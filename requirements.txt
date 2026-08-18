@@ -14,4 +14,5 @@ cartopy
 seaborn
 pillow
 scikit-learn
+pytest # for running synthetic field tests
 # shap  # optional: SHAP importance plots; falls back to permutation importance

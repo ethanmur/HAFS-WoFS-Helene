@@ -20,4 +20,5 @@ dependencies:
   - seaborn
   - pillow
   - scikit-learn
+  -pytest
   # shap  # optional: SHAP importance plots; falls back to permutation importance
