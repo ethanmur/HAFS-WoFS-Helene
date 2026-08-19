@@ -16,6 +16,8 @@ storm_name: Hurricane Helene
 domain: [15.0, 42.0, -100.0, -60.0]
 mask_radius_km: 500
 out_dir: analysis/output/helene_hfsm_cycles
+thresholds_mm: [2.54, 6.35, 12.7, 25.4, 50.8, 76.2, 101.6, 127.0, 177.8, 254.0]
+ets_threshold_mm: 25.4
 ets_bar_thresholds_in: [2, 4, 6, 8, 10, 12, 14, 16]
 fss_thresholds_in: [1, 2]
 # fss_scales_cells: [1, 3, 5, 11, 21, 41]
