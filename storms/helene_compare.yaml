@@ -4,11 +4,15 @@
 #   gunzip bal092024.dat.gz
 label: Hurricane Helene
 cases:
-  - storms/helene_hfsa.yaml
-  - storms/helene_hfsb.yaml
+  - /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene/storms/helene_hfsa.yaml
+  - /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene/storms/helene_hfsb.yaml
 best_track: /work2/noaa/aoml-hafs1/suchit/bal092024.dat
-out_dir: analysis/output/helene_compare
+
 # optional overrides:
 # thresholds_mm: [1, 5, 10, 25, 50, 75, 100, 150, 200, 250]
 # fss_scales_cells: [1, 3, 5, 11, 21, 41]
 # fss_plot_thresholds: [10, 25, 50]
+
+out_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_compare_compute
+mrms_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache

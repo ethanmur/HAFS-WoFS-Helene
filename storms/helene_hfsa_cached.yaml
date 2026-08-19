@@ -6,6 +6,6 @@ storm_name: Hurricane Helene
 init: 2024092400
 domain: [15.0, 42.0, -100.0, -60.0]   # lat_min, lat_max, lon_min, lon_max
 mask_radius_km: 500
-out_dir: analysis/output/helene_hfsa_cached
+out_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_hfsa_1run_compute_cached
 mrms_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
 stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache
