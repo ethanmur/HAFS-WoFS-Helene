@@ -476,15 +476,21 @@ def test_compute_cycles_writes_csv_and_pngs():
         ccase = _tiny_cycles_case(tmp, tmp)
         ccase.ml_features = True
         ccase.ml_features_csv = Path(tmp) / "ml_features.csv"
-        compute_cycles(ccase, fields=_tiny_cycle_fields())
         slug = "testcycles_2024092600_2024092800"
+        errors_png = Path(tmp) / f"cycles_errors_{slug}.png"
+        maps_png = Path(tmp) / f"cycles_maps_{slug}.png"
+        landfall_png = Path(tmp) / f"cycles_landfall_{slug}.png"
+        objects_png = Path(tmp) / f"cycles_objects_{slug}.png"
+        errors_png.write_bytes(b"obsolete")
+        maps_png.write_bytes(b"obsolete")
+        landfall_png.write_bytes(b"obsolete")
+        objects_png.write_bytes(b"obsolete")
+        compute_cycles(ccase, fields=_tiny_cycle_fields())
         csv_path = Path(tmp) / f"cycles_{slug}.csv"
         metrics_png = Path(tmp) / f"cycles_metrics_{slug}.png"
-        maps_png = Path(tmp) / f"cycles_maps_{slug}.png"
         ets_png = Path(tmp) / f"cycles_ets_heatmap_{slug}.png"
         ets_bars_png = Path(tmp) / f"cycles_ets_bars_{slug}.png"
         fss_png = Path(tmp) / f"cycles_fss_heatmap_{slug}.png"
-        errors_png = Path(tmp) / f"cycles_errors_{slug}.png"
         fss_csv = Path(tmp) / f"cycles_fss_{slug}.csv"
         dist_csv = Path(tmp) / f"cycles_dist_{slug}.csv"
         dist_png = Path(tmp) / f"cycles_dist_{slug}.png"
@@ -494,11 +500,13 @@ def test_compute_cycles_writes_csv_and_pngs():
         features_csv = Path(tmp) / "ml_features.csv"
         assert csv_path.exists(), "CSV not written"
         assert metrics_png.exists(), "metrics PNG not written"
-        assert maps_png.exists(), "maps PNG not written"
         assert ets_png.exists(), "ETS lead-time plot not written"
         assert ets_bars_png.exists(), "ETS threshold bars not written"
         assert fss_png.exists(), "FSS lead-time plot not written"
-        assert errors_png.exists(), "error maps not written"
+        assert not errors_png.exists(), "obsolete error maps not removed"
+        assert not maps_png.exists(), "obsolete QPF maps not removed"
+        assert not landfall_png.exists(), "obsolete landfall plot not removed"
+        assert not objects_png.exists(), "obsolete objects plot not removed"
         assert fss_csv.exists(), "FSS CSV not written"
         assert dist_csv.exists(), "distribution CSV not written"
         assert dist_png.exists(), "distribution PNG not written"
@@ -560,13 +568,21 @@ def test_pooled_ets_by_threshold_sums_counts_before_scoring():
     assert abs(row["ets"] - 0.24528301886792447) < 1e-12
 
 
-def test_animate_cycle_qpf_writes_gif():
-    from cycles import animate_cycle_qpf
+def test_separate_cycle_animations_write_gifs():
+    from cycles import (
+        animate_cycle_difference, animate_cycle_observed, animate_cycle_qpf,
+    )
     with tempfile.TemporaryDirectory() as tmp:
-        output = Path(tmp) / "cycles.gif"
-        animate_cycle_qpf(_tiny_cycles_case(tmp, tmp),
-                          _tiny_cycle_fields(), output)
-        assert output.exists() and output.stat().st_size > 0
+        fields = _tiny_cycle_fields()
+        animators = {
+            "cycles_qpf.gif": animate_cycle_qpf,
+            "cycles_difference.gif": animate_cycle_difference,
+            "cycles_observed.gif": animate_cycle_observed,
+        }
+        for filename, animator in animators.items():
+            output = Path(tmp) / filename
+            animator(_tiny_cycles_case(tmp, tmp), fields, output)
+            assert output.exists() and output.stat().st_size > 0
 
 
 def test_precipitation_error_levels_widen_beyond_two_inches():
@@ -579,14 +595,17 @@ def test_precipitation_error_levels_widen_beyond_two_inches():
     high_steps = np.diff(positive[positive >= 2.0])
     assert np.all(high_steps[1:] >= high_steps[:-1])
     assert 24.0 in positive
+    assert 0.1 in positive and 0.25 in positive and 0.5 in positive
 
 
-def test_representative_cycle_indices_add_intermediate_times():
-    from cycles import representative_cycle_indices
+def test_animation_qpf_levels_preserve_native_subinch_detail():
+    from hafs_common import QPF_LEVELS
+    from cycles import _ANIMATION_QPF_LEVELS_IN
 
-    assert representative_cycle_indices(11) == [0, 2, 4, 6, 8, 10]
-    assert representative_cycle_indices(3) == [0, 1, 2]
-    assert representative_cycle_indices(0) == []
+    assert np.allclose(_ANIMATION_QPF_LEVELS_IN,
+                       np.asarray(QPF_LEVELS, dtype=float) / 25.4)
+    assert np.any((_ANIMATION_QPF_LEVELS_IN > 0)
+                  & (_ANIMATION_QPF_LEVELS_IN < 0.5))
 
 
 def _run_all():

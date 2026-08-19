@@ -4,8 +4,8 @@ valid end. Cycles initialized after the configured start use an init-clipped
 window and matching observations over a shared union-of-tracks footprint.
 
 Uses the fixed parent domain exclusively. Produces landfall-relative metric
-curves, QPF small multiples, ETS/FSS lead-time plots, representative
-spatial-error maps, an animated QPF sequence, and long-format
+curves, QPF small multiples, ETS/FSS lead-time plots, separate
+forecast/observed/error animations, and long-format
 categorical/continuous and FSS CSVs.
 
 Usage (on Hercules):
@@ -26,7 +26,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib import animation, colors
+from matplotlib import animation, colors, ticker
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
@@ -50,14 +50,14 @@ from parent_qpf import (
 )
 from skill_metrics import continuous_scores, fractions_skill_score
 from precip_structure import (
-    distribution_stats, object_comparison, plot_distributions, plot_objects,
+    distribution_stats, object_comparison, plot_distributions,
     plot_pattern_r, plot_percentiles_by_cycle,
 )
 from rmse_scatter import valid_points
 from best_track import parse_bdeck_full
 from track_skill import (
     cycle_track_summary, landfall_metrics, mean_displacement_deg,
-    plot_landfall, plot_shifted_skill, plot_track_error, plot_track_precip,
+    plot_shifted_skill, plot_track_error, plot_track_precip,
     motion_vector, score_shifted, track_error_rows,
 )
 from plot_units import format_inches, format_miles, inches, miles
@@ -277,12 +277,22 @@ def build_cycle_fields(ccase):
 # Scoring + outputs
 # =============================================================================
 
+_PLOT_TYPOGRAPHY = {
+    "font.weight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelweight": "bold",
+    "figure.titleweight": "bold",
+}
+
+
 def _plot_theme():
     """Use seaborn when available while retaining a dependency-light fallback."""
     if sns is not None:
-        sns.set_theme(context="notebook", style="whitegrid", font_scale=1.0)
+        sns.set_theme(context="notebook", style="whitegrid", font_scale=1.0,
+                      rc=_PLOT_TYPOGRAPHY)
     else:
         plt.style.use("seaborn-v0_8-whitegrid")
+        plt.rcParams.update(_PLOT_TYPOGRAPHY)
 
 
 def _inches_to_mm(value):
@@ -315,6 +325,14 @@ def cycle_label(ccase, init_dt):
     if lead is None:
         return init_dt.strftime("%m-%d %HZ")
     return f"{init_dt:%m-%d %HZ}\n{lead:.0f} h pre-LF"
+
+
+# Preserve every native QPF color boundary, including the 0.2- and 0.4-inch
+# bands that carry important swath detail. Only the displayed tick text is
+# rounded to friendly inch values.
+_ANIMATION_QPF_LEVELS_IN = (
+    np.asarray(QPF_LEVELS, dtype=float) / 25.4
+)
 
 
 def cycle_window_label(cycle):
@@ -382,19 +400,14 @@ def plot_metrics(ccase, results, out_path, caveat=""):
         axes[-1].set_xticks(x)
         axes[-1].set_xticklabels([f"{value:.0f}" for value in x])
         axes[-1].invert_xaxis()
-        landfall_text = f" | landfall {ccase.landfall_time:%Y-%m-%d %H%MZ}"
     else:
         axes[-1].set_xlabel("initialization")
         axes[-1].set_xticks(inits)
         axes[-1].set_xticklabels([i.strftime("%m-%d %HZ") for i in inits],
                                  rotation=45, ha="right")
-        landfall_text = ""
     fig.suptitle(
-        f"{ccase.storm_name} — {ccase.model_label} continuous QPF errors "
-        "by initialization\n"
-        f"start = later of {ccase.valid_start:%Y-%m-%d %HZ} or init; "
-        f"end = {ccase.valid_end:%Y-%m-%d %HZ} | union TC swath "
-        f"≤{miles(ccase.mask_radius_km):.0f} miles{landfall_text}")
+        f"{ccase.storm_name} — {ccase.model_label} QPF Errors by "
+        "Initialization")
     if caveat:
         fig.text(0.5, -0.01, caveat, ha="center", fontsize=8, color="#555")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
@@ -475,13 +488,13 @@ def plot_ets_leadtime(ccase, results, out_path):
     values = np.asarray(
         [[by_init.get(init_dt, {}).get(threshold, np.nan) for init_dt in inits]
          for threshold in thresholds], dtype=float)
-    use_lead = ccase.landfall_time is not None
-    xlabels = [cycle_label(ccase, init_dt) for init_dt in inits]
+    xlabels = [init_dt.strftime("%m-%d %HZ") for init_dt in inits]
     ylabels = [f"≥ {format_inches(threshold)}" for threshold in thresholds]
     annotate = values.size <= 80
     fig, ax = plt.subplots(
         figsize=(max(8.0, 1.35 * len(inits) + 3.0),
                  max(4.2, 0.68 * len(thresholds) + 2.4)))
+    colorbar = None
     if sns is not None:
         cmap = sns.diverging_palette(240, 15, s=80, l=45, as_cmap=True)
         ax.set_facecolor("#eceff1")
@@ -493,14 +506,16 @@ def plot_ets_leadtime(ccase, results, out_path):
             cbar_kws={"label": "Equitable Threat Score (ETS)",
                       "shrink": 0.88},
         )
+        colorbar = ax.collections[0].colorbar
         for row, col in np.argwhere(~np.isfinite(values)):
             ax.text(col + 0.5, row + 0.5, "—", ha="center", va="center",
                     color="#7a7a7a", fontsize=9)
     else:
         norm = colors.TwoSlopeNorm(vmin=-0.2, vcenter=0.0, vmax=1.0)
         image = ax.imshow(values, cmap="RdBu_r", norm=norm, aspect="auto")
-        fig.colorbar(image, ax=ax, label="Equitable Threat Score (ETS)",
-                     shrink=0.88)
+        colorbar = fig.colorbar(image, ax=ax,
+                                 label="Equitable Threat Score (ETS)",
+                                 shrink=0.88)
         ax.set_xticks(np.arange(len(inits)), labels=xlabels)
         ax.set_yticks(np.arange(len(thresholds)), labels=ylabels)
         if annotate:
@@ -511,20 +526,19 @@ def plot_ets_leadtime(ccase, results, out_path):
             ax.text(col, row, "—", ha="center", va="center",
                     color="#7a7a7a", fontsize=9)
 
-    if use_lead:
-        xlabel = "Forecast initialization (UTC) and lead time to landfall"
-        timing = f" | landfall {ccase.landfall_time:%Y-%m-%d %H%MZ}"
-    else:
-        xlabel = "Forecast initialization (UTC)"
-        timing = ""
-    ax.set_xlabel(xlabel, labelpad=10)
-    ax.set_ylabel("Rainfall threshold (inches)")
-    ax.tick_params(axis="x", labelrotation=0)
-    ax.tick_params(axis="y", labelrotation=0)
+    ax.set_xlabel("Forecast Initialization (UTC)", labelpad=10,
+                  fontsize=13, fontweight="semibold")
+    ax.set_ylabel("Rainfall Threshold (in)", fontsize=13,
+                  fontweight="semibold")
+    ax.tick_params(axis="x", labelrotation=0, labelsize=11)
+    ax.tick_params(axis="y", labelrotation=0, labelsize=11)
+    if colorbar is not None:
+        colorbar.set_label("Equitable Threat Score (ETS)", fontsize=13,
+                           fontweight="semibold")
+        colorbar.ax.tick_params(labelsize=11)
     ax.set_title(
-        f"{ccase.storm_name} — {ccase.model_label} parent ETS evolution\n"
-        f"MRMS verification by rainfall threshold{timing}", fontsize=14,
-        pad=14)
+        f"{ccase.storm_name} — {ccase.model_label} Parent ETS Progression",
+        fontsize=18, fontweight="bold", pad=16)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -600,19 +614,16 @@ def plot_ets_threshold_bars(ccase, results, out_path):
     n_cycles = max((row["n_cycles"] for row in summary), default=0)
     ax.axhline(0.0, color="#555555", linewidth=0.8)
     ax.set_xticks(x, [f"{row['threshold_in']:g}" for row in summary])
-    ax.set_xlabel("Rainfall accumulation threshold (inches)")
+    ax.set_xlabel("Rainfall Accumulation Threshold (in)")
     ax.set_ylabel("Equitable Threat Score (ETS)")
     ax.grid(axis="y", linestyle="-", linewidth=0.7, alpha=0.18)
     ax.set_axisbelow(True)
     ax.spines[["top", "right", "left"]].set_visible(False)
     ax.tick_params(axis="y", length=0)
     ax.set_title(
-        f"{ccase.storm_name} · {ccase.model_label} parent rainfall skill\n"
-        f"Pooled ETS across {n_cycles} forecast cycles vs MRMS | "
-        f"init-clipped windows ending {ccase.valid_end:%Y-%m-%d %HZ}",
+        f"{ccase.storm_name} · {ccase.model_label} Parent Rainfall Skill "
+        f"Average ETS Across {n_cycles} Forecast Cycles vs MRMS",
         fontsize=14, fontweight="semibold", pad=15, loc="left")
-    ax.text(1.0, 1.015, "Higher is better", transform=ax.transAxes,
-            ha="right", va="bottom", fontsize=9, color="#607080")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -630,7 +641,6 @@ def plot_fss_leadtime(ccase, fss_rows, out_path):
     if not inits or not thresholds or not scales:
         raise ValueError("No parent-vs-MRMS FSS rows to plot.")
 
-    use_lead = ccase.landfall_time is not None
     # A label for every six-hourly cycle is unreadable once the suite reaches
     # ten-plus initializations. Keep every other label while retaining every
     # heatmap column.
@@ -669,28 +679,23 @@ def plot_fss_leadtime(ccase, fss_rows, out_path):
                                        vmax=1.0, aspect="auto")
             ax.set_xticks(np.arange(len(inits)), labels=xlabels)
             ax.set_yticks(np.arange(len(scales)), labels=ylabels)
-        unit = "inch" if np.isclose(threshold, 1.0) else "inches"
-        ax.set_title(f"Rainfall ≥ {threshold:g} {unit}", fontsize=12,
+        ax.set_title(f"Rainfall ≥ {threshold:g} in", fontsize=14,
                      fontweight="bold")
         ax.set_xlabel("")
         ax.set_ylabel("")
-        ax.tick_params(axis="x", labelrotation=0, labelsize=8, pad=4)
-        ax.tick_params(axis="y", labelrotation=0, labelsize=9)
+        ax.tick_params(axis="x", labelrotation=0, labelsize=10, pad=4)
+        ax.tick_params(axis="y", labelrotation=0, labelsize=11)
     if fallback_image is not None:
         fig.colorbar(fallback_image, cax=cbar_ax,
                      label="Fractions Skill Score (FSS)")
 
-    if use_lead:
-        xlabel = "Forecast initialization (UTC)"
-        timing = f" | landfall {ccase.landfall_time:%Y-%m-%d %H%MZ}"
-    else:
-        xlabel = "Forecast initialization (UTC)"
-        timing = ""
-    fig.supxlabel(xlabel, y=0.04, fontsize=11)
-    fig.supylabel("Neighborhood scale (miles)", x=0.02, fontsize=11)
+    fig.supxlabel("Forecast Initialization (UTC)", y=0.04, fontsize=13,
+                  fontweight="semibold")
+    fig.supylabel("Neighborhood Scale (mi)", x=0.02, fontsize=13,
+                  fontweight="semibold")
     fig.suptitle(
-        f"{ccase.storm_name} — {ccase.model_label} parent FSS evolution\n"
-        f"MRMS verification across neighborhood scales{timing}", fontsize=14)
+        f"{ccase.storm_name} — {ccase.model_label} Parent FSS Progression",
+        fontsize=18, fontweight="bold")
     fig.subplots_adjust(left=0.09, right=0.95, bottom=0.20, top=0.80,
                         wspace=0.10)
     fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
@@ -748,105 +753,107 @@ def _precipitation_error_scale(error_fields):
     return cmap, norm, ticks
 
 
-def representative_cycle_indices(cycle_count, max_panels=6):
-    """Evenly spaced cycle indices including the first and last cycles."""
-    if cycle_count <= 0 or max_panels <= 0:
-        return []
-    panel_count = min(int(max_panels), int(cycle_count))
-    return sorted(set(np.rint(np.linspace(
-        0, cycle_count - 1, panel_count)).astype(int)))
-
-
-def plot_error_maps(ccase, fields, out_path):
-    """Parent minus MRMS for up to six evenly spaced representative cycles."""
+def _animate_cycle_field(ccase, fields, out_path, data_by_cycle, cmap, norm,
+                         colorbar_label, panel_title, colorbar_ticks=None,
+                         colorbar_spacing=None):
+    """Animate one cycle field so each GIF remains readable on its own."""
     cycles_data = fields["cycles"]
-    indices = representative_cycle_indices(len(cycles_data))
-    selected = [cycles_data[index] for index in indices]
-    errors = [(cycle["parent_win"]
-              - _cycle_observation(cycle, fields, "MRMS")) / 25.4
-              for cycle in selected]
-    error_cmap, norm, error_ticks = _precipitation_error_scale(errors)
-    ncols = min(3, len(selected))
-    nrows = int(np.ceil(len(selected) / ncols))
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(5.3 * ncols, 4.4 * nrows), squeeze=False,
-        subplot_kw={"projection": ccrs.PlateCarree()})
-    flat_axes = axes.ravel()
-    mesh = None
-    for ax, cycle, error_field in zip(flat_axes, selected, errors):
+    projection = ccrs.PlateCarree()
+    fig, ax = plt.subplots(figsize=(7.6, 5.8),
+                           subplot_kw={"projection": projection})
+    fig.subplots_adjust(left=0.06, right=0.82, bottom=0.08, top=0.76)
+    colorbar_kwargs = {
+        "ax": ax,
+        "shrink": 0.94,
+        "fraction": 0.052,
+        "pad": 0.035,
+        "label": colorbar_label,
+    }
+    if colorbar_ticks is not None:
+        colorbar_kwargs["ticks"] = colorbar_ticks
+    if colorbar_spacing is not None:
+        colorbar_kwargs["spacing"] = colorbar_spacing
+    scalar_map = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    colorbar = fig.colorbar(scalar_map, **colorbar_kwargs)
+    colorbar.ax.tick_params(labelsize=10, pad=5)
+    colorbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(
+        lambda value, _: (
+            f"{int(round(value))}"
+            if np.isclose(value, round(value), atol=0.03)
+            else (f"{value:.1f}" if abs(value) < 1.0 else f"{value:.0f}")
+        )
+    ))
+    colorbar.set_label(colorbar_label, fontsize=11, fontweight="bold",
+                       labelpad=12)
+
+    def update(frame):
+        cycle = cycles_data[frame]
+        ax.clear()
         _map_context(ax, ccase)
-        error = np.where(fields["swath"], error_field, np.nan)
-        mesh = ax.pcolormesh(fields["grid_lon"], fields["grid_lat"], error,
-                             cmap=error_cmap, norm=norm, shading="auto",
-                             transform=ccrs.PlateCarree())
+        masked = np.where(fields["swath"], data_by_cycle[frame], np.nan)
+        ax.pcolormesh(fields["grid_lon"], fields["grid_lat"], masked,
+                      cmap=cmap, norm=norm, shading="auto",
+                      transform=projection)
         ax.contour(fields["grid_lon"], fields["grid_lat"],
                    fields["swath"].astype(float), levels=[0.5],
                    colors="#333333", linewidths=0.7,
-                   transform=ccrs.PlateCarree())
-        ax.set_title(f"{cycle_label(ccase, cycle['init_dt'])}\n"
-                     f"{cycle_window_label(cycle)}")
-    for ax in flat_axes[len(selected):]:
-        ax.set_visible(False)
-    visible_axes = list(flat_axes[:len(selected)])
-    fig.colorbar(mesh, ax=visible_axes, shrink=0.82, pad=0.02,
-                 ticks=error_ticks,
-                 spacing="uniform",
-                 label="Forecast − MRMS (inches; wider intervals at extremes)")
-    fig.suptitle(f"{ccase.storm_name} — {ccase.model_label} representative "
-                 "cycle errors", fontsize=13)
-    fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
+                   transform=projection)
+        ax.set_title(panel_title, fontsize=13, fontweight="bold", pad=6)
+        init_label = cycle_label(ccase, cycle["init_dt"]).replace(
+            "\n", " · ")
+        fig.suptitle(
+            f"{ccase.storm_name} — {ccase.model_label}\n"
+            f"{init_label} | {cycle_window_label(cycle)}",
+            fontsize=13, fontweight="bold", linespacing=1.35, y=0.97)
+        return (ax,)
+
+    movie = animation.FuncAnimation(fig, update, frames=len(cycles_data),
+                                    interval=1200, repeat=True, blit=False)
+    movie.save(out_path, writer=animation.PillowWriter(fps=1), dpi=140)
     plt.close(fig)
 
 
 def animate_cycle_qpf(ccase, fields, out_path):
-    """Animate parent QPF and its MRMS error across initializations."""
-    cycles_data = fields["cycles"]
-    errors = [(cycle["parent_win"]
-              - _cycle_observation(cycle, fields, "MRMS")) / 25.4
-              for cycle in cycles_data]
-    error_cmap, error_norm, error_ticks = _precipitation_error_scale(errors)
+    """Animate parent-domain forecast QPF across initializations."""
     qpf_cmap_obj, _ = qpf_cmap()
     qpf_norm = colors.BoundaryNorm(
-        np.asarray(QPF_LEVELS, dtype=float) / 25.4, qpf_cmap_obj.N)
-    projection = ccrs.PlateCarree()
-    fig, axes = plt.subplots(1, 2, figsize=(11.8, 5.4),
-                             subplot_kw={"projection": projection})
-    qpf_map = plt.cm.ScalarMappable(norm=qpf_norm, cmap=qpf_cmap_obj)
-    err_map = plt.cm.ScalarMappable(norm=error_norm, cmap=error_cmap)
-    fig.colorbar(qpf_map, ax=axes[0], shrink=0.76, pad=0.025,
-                 label="Accumulated precipitation (inches)")
-    fig.colorbar(err_map, ax=axes[1], shrink=0.76, pad=0.025,
-                 ticks=error_ticks, spacing="uniform",
-                 label="Forecast − MRMS (inches; wider intervals at extremes)")
+        _ANIMATION_QPF_LEVELS_IN, qpf_cmap_obj.N)
+    forecasts = [cycle["parent_win"] / 25.4
+                 for cycle in fields["cycles"]]
+    _animate_cycle_field(
+        ccase, fields, out_path, forecasts, qpf_cmap_obj, qpf_norm,
+        "Accumulated Precipitation (in)", "Parent Forecast",
+        colorbar_ticks=_ANIMATION_QPF_LEVELS_IN,
+        colorbar_spacing="uniform")
 
-    def update(frame):
-        cycle = cycles_data[frame]
-        panels = (
-            (cycle["parent_win"] / 25.4, qpf_cmap_obj, qpf_norm,
-             "Parent forecast"),
-            (errors[frame], error_cmap, error_norm, "Parent − MRMS"),
-        )
-        for ax, (data, cmap, norm, title) in zip(axes, panels):
-            ax.clear()
-            _map_context(ax, ccase)
-            masked = np.where(fields["swath"], data, np.nan)
-            ax.pcolormesh(fields["grid_lon"], fields["grid_lat"], masked,
-                          cmap=cmap, norm=norm, shading="auto",
-                          transform=projection)
-            ax.contour(fields["grid_lon"], fields["grid_lat"],
-                       fields["swath"].astype(float), levels=[0.5],
-                       colors="#333333", linewidths=0.7,
-                       transform=projection)
-            ax.set_title(title)
-        fig.suptitle(f"{ccase.storm_name} — {ccase.model_label} · "
-                     f"{cycle_label(ccase, cycle['init_dt']).replace(chr(10), ' · ')}"
-                     f" · {cycle_window_label(cycle)}")
-        return axes
 
-    movie = animation.FuncAnimation(fig, update, frames=len(cycles_data),
-                                    interval=1200, repeat=True, blit=False)
-    movie.save(out_path, writer=animation.PillowWriter(fps=1), dpi=110)
-    plt.close(fig)
+def animate_cycle_difference(ccase, fields, out_path):
+    """Animate parent forecast minus MRMS across initializations."""
+    errors = [(cycle["parent_win"]
+              - _cycle_observation(cycle, fields, "MRMS")) / 25.4
+              for cycle in fields["cycles"]]
+    error_cmap, error_norm, error_ticks = _precipitation_error_scale(errors)
+    _animate_cycle_field(
+        ccase, fields, out_path, errors, error_cmap, error_norm,
+        "Forecast − MRMS (in)",
+        "Parent − MRMS", colorbar_ticks=error_ticks,
+        colorbar_spacing="uniform")
+
+
+def animate_cycle_observed(ccase, fields, out_path):
+    """Animate cycle-matched MRMS QPE (static while its window is unchanged)."""
+    qpf_cmap_obj, _ = qpf_cmap()
+    qpf_norm = colors.BoundaryNorm(
+        _ANIMATION_QPF_LEVELS_IN, qpf_cmap_obj.N)
+    observations = [
+        _cycle_observation(cycle, fields, "MRMS") / 25.4
+        for cycle in fields["cycles"]
+    ]
+    _animate_cycle_field(
+        ccase, fields, out_path, observations, qpf_cmap_obj, qpf_norm,
+        "Accumulated Precipitation (in)", "MRMS Observed",
+        colorbar_ticks=_ANIMATION_QPF_LEVELS_IN,
+        colorbar_spacing="uniform")
 
 
 def compute_cycles(ccase, fields=None):
@@ -1121,12 +1128,20 @@ def compute_cycles(ccase, fields=None):
     caveat = cycles_caveat(fields, ccase)
     print(caveat)
     out_metrics = ccase.out_dir / f"cycles_metrics_{slug}.png"
-    out_maps = ccase.out_dir / f"cycles_maps_{slug}.png"
     # Keep the established filenames for download and gallery compatibility.
     out_ets_leadtime = ccase.out_dir / f"cycles_ets_heatmap_{slug}.png"
     out_ets_bars = ccase.out_dir / f"cycles_ets_bars_{slug}.png"
     out_fss_leadtime = ccase.out_dir / f"cycles_fss_heatmap_{slug}.png"
-    out_errors = ccase.out_dir / f"cycles_errors_{slug}.png"
+    obsolete_plots = [
+        ccase.out_dir / f"cycles_errors_{slug}.png",
+        ccase.out_dir / f"cycles_maps_{slug}.png",
+        ccase.out_dir / f"cycles_landfall_{slug}.png",
+        ccase.out_dir / f"cycles_objects_{slug}.png",
+    ]
+    for obsolete_plot in obsolete_plots:
+        if obsolete_plot.exists():
+            obsolete_plot.unlink()
+            print(f"Removed obsolete plot: {obsolete_plot}")
     structure_plots = [
         (ccase.out_dir / f"cycles_dist_{slug}.png",
          lambda path: plot_distributions(ccase, fields, path)),
@@ -1134,8 +1149,6 @@ def compute_cycles(ccase, fields=None):
          lambda path: plot_percentiles_by_cycle(ccase, summary_rows, path)),
         (ccase.out_dir / f"cycles_pattern_r_{slug}.png",
          lambda path: plot_pattern_r(ccase, summary_rows, path)),
-        (ccase.out_dir / f"cycles_objects_{slug}.png",
-         lambda path: plot_objects(ccase, summary_rows, path)),
     ]
     for path, plotter in structure_plots:
         if plotter(path):
@@ -1144,8 +1157,6 @@ def compute_cycles(ccase, fields=None):
             print(f"Skipped plot: {path.name} (no finite data)")
     plot_metrics(ccase, results, out_metrics, caveat=caveat)
     print(f"Saved plot : {out_metrics}")
-    plot_maps(ccase, fields, out_maps)
-    print(f"Saved plot : {out_maps}")
     plot_ets_leadtime(ccase, results, out_ets_leadtime)
     print(f"Saved plot : {out_ets_leadtime}")
     plot_ets_threshold_bars(ccase, results, out_ets_bars)
@@ -1154,11 +1165,8 @@ def compute_cycles(ccase, fields=None):
     print(f"Saved plot : {out_fss_leadtime}")
     if bdeck_full is not None and track_rows_by_init:
         out_track_plot = ccase.out_dir / f"cycles_track_error_{slug}.png"
-        out_landfall_plot = ccase.out_dir / f"cycles_landfall_{slug}.png"
         plot_track_error(track_rows_by_init, ccase, out_track_plot)
         print(f"Saved plot : {out_track_plot}")
-        plot_landfall(track_summaries_by_init, ccase, out_landfall_plot)
-        print(f"Saved plot : {out_landfall_plot}")
     if bdeck_full is not None:
         out_shifted_plot = ccase.out_dir / f"cycles_shifted_ets_{slug}.png"
         out_track_precip = ccase.out_dir / f"cycles_track_precip_{slug}.png"
@@ -1166,16 +1174,22 @@ def compute_cycles(ccase, fields=None):
         print(f"Saved plot : {out_shifted_plot}")
         plot_track_precip(summary_rows, ccase, out_track_precip)
         print(f"Saved plot : {out_track_precip}")
-    plot_error_maps(ccase, fields, out_errors)
-    print(f"Saved plot : {out_errors}")
     if ccase.make_animation:
-        out_animation = ccase.out_dir / f"cycles_qpf_{slug}.gif"
-        try:
-            animate_cycle_qpf(ccase, fields, out_animation)
-        except (ImportError, RuntimeError) as exc:
-            print(f"Animation unavailable: {exc}")
-        else:
-            print(f"Saved movie: {out_animation}")
+        animations = [
+            (ccase.out_dir / f"cycles_qpf_{slug}.gif",
+             animate_cycle_qpf),
+            (ccase.out_dir / f"cycles_difference_{slug}.gif",
+             animate_cycle_difference),
+            (ccase.out_dir / f"cycles_observed_{slug}.gif",
+             animate_cycle_observed),
+        ]
+        for out_animation, animator in animations:
+            try:
+                animator(ccase, fields, out_animation)
+            except (ImportError, RuntimeError) as exc:
+                print(f"Animation unavailable ({out_animation.name}): {exc}")
+            else:
+                print(f"Saved movie: {out_animation}")
 
     if ccase.ml_features:
         try:

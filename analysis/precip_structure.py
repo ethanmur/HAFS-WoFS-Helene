@@ -21,6 +21,18 @@ OBJECT_FIELDS = (
     "obj_max_ratio",
 )
 
+_PLOT_TYPOGRAPHY = {
+    "font.weight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelweight": "bold",
+    "figure.titleweight": "bold",
+}
+
+
+def _apply_plot_typography():
+    """Keep cycle-structure text consistently bold and legible."""
+    plt.rcParams.update(_PLOT_TYPOGRAPHY)
+
 
 def _nan_dict(keys):
     return {key: np.nan for key in keys}
@@ -98,17 +110,18 @@ def _cycle_x(ccase, rows):
 def _format_cycle_axis(ax, ccase, inits, x):
     ax.set_xticks(x)
     if ccase.landfall_time is not None:
-        ax.set_xlabel("Hours before landfall (forecast initialization)")
+        ax.set_xlabel("Hours Before Landfall (Forecast Initialization)")
         ax.set_xticklabels([f"{value:.0f}" for value in x])
         ax.invert_xaxis()
     else:
-        ax.set_xlabel("initialization")
+        ax.set_xlabel("Initialization")
         ax.set_xticklabels([value.strftime("%m-%d %HZ") for value in inits],
                            rotation=45, ha="right")
 
 
 def plot_distributions(ccase, fields, out_path):
     """Plot pooled PDF/CDF and per-cycle plus pooled forecast-MRMS Q-Q."""
+    _apply_plot_typography()
     cycles = fields["cycles"]
     swath = fields["swath"]
     sources = [
@@ -180,6 +193,7 @@ def plot_distributions(ccase, fields, out_path):
 
 def plot_percentiles_by_cycle(ccase, summary_rows, out_path):
     """Plot upper percentiles and precipitation volume by cycle."""
+    _apply_plot_typography()
     rows = [row for row in summary_rows
             if any(np.isfinite(row.get(key, np.nan))
                    for key in ("fcst_p90", "obs_p90", "fcst_volume_km3",
@@ -193,27 +207,28 @@ def plot_percentiles_by_cycle(ccase, summary_rows, out_path):
         axes[0].plot(x, [inches(row.get(f"fcst_p{percentile}", np.nan))
                          for row in rows],
                      color=colors[percentile], marker="o", lw=2,
-                     label=f"forecast P{percentile}")
+                     label=f"{ccase.model_label} {percentile}%")
         axes[0].plot(x, [inches(row.get(f"obs_p{percentile}", np.nan))
                          for row in rows],
                      color=colors[percentile], marker="s", lw=1.4, ls="--",
-                     label=f"MRMS P{percentile}")
+                     label=f"MRMS {percentile}%")
     axes[1].plot(x, [cubic_miles(row.get("fcst_volume_km3", np.nan))
                      for row in rows],
-                 color="#2563a6", marker="o", lw=2, label="forecast")
+                 color="#2563a6", marker="o", lw=2,
+                 label=ccase.model_label)
     axes[1].plot(x, [cubic_miles(row.get("obs_volume_km3", np.nan))
                      for row in rows],
                  color="#222222", marker="s", lw=2, ls="--", label="MRMS")
-    axes[0].set_ylabel("Precipitation (inches)")
-    axes[1].set_ylabel("Volume (cubic miles)")
+    axes[0].set_ylabel("Precipitation (in)")
+    axes[1].set_ylabel("Volume (Cubic Miles)")
     axes[0].legend(ncols=2, fontsize=8, frameon=False)
     axes[1].legend(frameon=False)
     for ax in axes:
         ax.grid(True, ls=":", alpha=0.4)
     _format_cycle_axis(axes[-1], ccase, inits, x)
     fig.suptitle(
-        f"{ccase.storm_name} — {ccase.model_label} precipitation structure "
-        "by cycle")
+        f"{ccase.storm_name} — {ccase.model_label} Precipitation Structure "
+        "by Cycle")
     fig.tight_layout()
     fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -222,6 +237,7 @@ def plot_percentiles_by_cycle(ccase, summary_rows, out_path):
 
 def plot_pattern_r(ccase, summary_rows, out_path):
     """Plot unshifted and optional track-shifted pattern correlation."""
+    _apply_plot_typography()
     rows = [row for row in summary_rows
             if (np.isfinite(row.get("pattern_r", np.nan))
                 or np.isfinite(row.get("pattern_r_shifted", np.nan)))]
@@ -230,17 +246,17 @@ def plot_pattern_r(ccase, summary_rows, out_path):
     rows, inits, x = _cycle_x(ccase, rows)
     fig, ax = plt.subplots(figsize=(10.5, 5.4))
     ax.plot(x, [row.get("pattern_r", np.nan) for row in rows], marker="o",
-            lw=2.2, color="#2563a6", label="forecast")
+            lw=2.2, color="#2563a6", label="Forecast")
     shifted = np.asarray([row.get("pattern_r_shifted", np.nan) for row in rows])
     if np.isfinite(shifted).any():
         ax.plot(x, shifted, marker="s", lw=2, ls="--", color="#d97941",
-                label="track-shifted")
-    ax.set_ylabel("Pearson pattern correlation")
+                label="Best-Track Shifted")
+    ax.set_ylabel("Pearson Pattern Correlation")
     ax.grid(True, ls=":", alpha=0.4)
     ax.legend(frameon=False)
     _format_cycle_axis(ax, ccase, inits, x)
     ax.set_title(
-        f"{ccase.storm_name} — {ccase.model_label} pattern correlation vs MRMS")
+        f"{ccase.storm_name} — {ccase.model_label} Pattern Correlation vs MRMS")
     fig.tight_layout()
     fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -354,6 +370,7 @@ def object_comparison(fcst, obs, swath, grid_lat, grid_lon, threshold_mm,
 
 def plot_objects(ccase, summary_rows, out_path):
     """Plot object areas/ratios and centroid displacement components."""
+    _apply_plot_typography()
     rows = [row for row in summary_rows
             if any(np.isfinite(row.get(key, np.nan)) for key in OBJECT_FIELDS)]
     if not rows:

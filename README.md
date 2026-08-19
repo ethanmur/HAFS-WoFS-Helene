@@ -130,12 +130,12 @@ Cycle outputs are:
 cycles_<case>_<start>_<end>.csv
 cycles_fss_<case>_<start>_<end>.csv
 cycles_metrics_<case>_<start>_<end>.png
-cycles_maps_<case>_<start>_<end>.png
 cycles_ets_heatmap_<case>_<start>_<end>.png
 cycles_ets_bars_<case>_<start>_<end>.png
 cycles_fss_heatmap_<case>_<start>_<end>.png
-cycles_errors_<case>_<start>_<end>.png
 cycles_qpf_<case>_<start>_<end>.gif
+cycles_difference_<case>_<start>_<end>.gif
+cycles_observed_<case>_<start>_<end>.gif
 ```
 
 The multi-cycle products use only the fixed parent domain. ETS is shown as a
@@ -143,8 +143,10 @@ Seaborn heatmap of rainfall threshold by initialization; FSS uses one Seaborn
 heatmap per rainfall threshold, with neighborhood scale by initialization.
 The model-level ETS bar chart follows the paper-style 2–24 inch threshold axis
 and pools contingency counts across cycles before calculating ETS. The suite
-also includes shared map scales, representative parent-minus-MRMS errors, and
-an animated parent-QPF sequence. Set `make_animation: false` to skip the GIF.
+also includes separate parent-forecast, parent-minus-MRMS, and observed-MRMS
+animations. The
+observed animation remains visually static while its accumulation window is
+unchanged. Set `make_animation: false` to skip all three GIFs.
 Optional `ets_bar_thresholds_in`,
 `fss_thresholds_in` and `fss_scales_cells` lists control the bar-chart and FSS
 thresholds/scales.

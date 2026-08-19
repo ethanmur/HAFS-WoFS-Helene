@@ -295,36 +295,37 @@ def _summary_x(rows, ccase):
 
 
 def plot_shifted_skill(summary_rows, ccase, out_path):
-    """Paired unshifted/track-shifted headline ETS and FSS bars."""
+    """Compare unshifted and best-track-shifted ETS/FSS with line graphs."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     _plot_theme()
     rows, x, use_lead = _summary_x(summary_rows, ccase)
-    width = 0.36
     fig, axes = plt.subplots(2, 1, figsize=(10.5, 8), sharex=True)
     panels = (("ets_headline", "ets_shifted", "ETS"),
               ("fss_headline", "fss_shifted", "FSS"))
     for ax, (raw_key, shifted_key, label) in zip(axes, panels):
         raw = [row.get(raw_key, np.nan) for row in rows]
         shifted = [row.get(shifted_key, np.nan) for row in rows]
-        ax.bar(x - width / 2, raw, width, color="#607d9b", label="Unshifted")
-        ax.bar(x + width / 2, shifted, width, color="#d97941",
-               label="Track-shifted")
+        ax.plot(x, raw, color="#607d9b", marker="o", lw=2.2,
+                label="Unshifted")
+        ax.plot(x, shifted, color="#d97941", marker="s", lw=2.2,
+                ls="--", label="Best-Track Shifted")
         ax.set_ylabel(label)
         ax.grid(axis="y", ls=":", alpha=0.4)
     axes[0].legend(frameon=False, ncol=2)
     axes[-1].set_xticks(x)
     if use_lead:
-        axes[-1].set_xlabel("Hours before landfall (forecast initialization)")
+        axes[-1].set_xlabel("Hours Before Landfall (Forecast Initialization)")
         axes[-1].set_xticklabels([f"{value:.0f}" for value in x])
         axes[-1].invert_xaxis()
     else:
         axes[-1].set_xlabel("Initialization")
         axes[-1].set_xticklabels([str(row.get("init", "")) for row in rows],
                                   rotation=45, ha="right")
-    fig.suptitle(f"{ccase.storm_name} — {ccase.model_label} track-shifted skill")
+    fig.suptitle(
+        f"{ccase.storm_name} — {ccase.model_label} Best-Track Shifted Skill")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
     plt.close(fig)
@@ -344,7 +345,7 @@ def plot_track_precip(summary_rows, ccase, out_path):
                        for row in summary_rows], dtype=float)
     panels = (("ets_headline", "ETS", False),
               ("fss_headline", "FSS", False),
-              ("rmse", "RMSE (inches)", True))
+              ("rmse", "RMSE (in)", True))
     scatter = None
     for ax, (key, label, convert_rain) in zip(axes, panels):
         values = np.asarray([row.get(key, np.nan) for row in summary_rows],
@@ -355,16 +356,15 @@ def plot_track_precip(summary_rows, ccase, out_path):
         colors = lead[finite] if np.isfinite(lead[finite]).any() else None
         scatter = ax.scatter(track[finite], values[finite], c=colors,
                              cmap="viridis", s=48, edgecolor="white")
-        ax.text(0.03, 0.97, correlation_annotation(track, values),
-                transform=ax.transAxes, va="top", fontsize=9)
-        ax.set_xlabel("Mean track error (miles)")
+        ax.set_xlabel("Mean Track Error (mi)")
         ax.set_ylabel(label)
         ax.grid(True, ls=":", alpha=0.4)
     if (scatter is not None and scatter.get_array() is not None
             and scatter.get_array().size):
-        fig.colorbar(scatter, ax=axes, label="Hours before landfall",
+        fig.colorbar(scatter, ax=axes, label="Hours Before Landfall",
                      fraction=0.025, pad=0.03)
-    fig.suptitle(f"{ccase.storm_name} — {ccase.model_label} track vs precipitation skill")
+    fig.suptitle(
+        f"{ccase.storm_name} — {ccase.model_label} Track vs Precipitation Skill")
     fig.subplots_adjust(left=0.06, right=0.92, bottom=0.14, top=0.86,
                         wspace=0.32)
     fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
@@ -372,12 +372,20 @@ def plot_track_precip(summary_rows, ccase, out_path):
 
 
 def _plot_theme():
+    typography = {
+        "font.weight": "bold",
+        "axes.titleweight": "bold",
+        "axes.labelweight": "bold",
+        "figure.titleweight": "bold",
+    }
     try:
         import seaborn as sns
-        sns.set_theme(context="notebook", style="whitegrid", font_scale=1.0)
+        sns.set_theme(context="notebook", style="whitegrid", font_scale=1.0,
+                      rc=typography)
     except ImportError:
         import matplotlib.pyplot as plt
         plt.style.use("seaborn-v0_8-whitegrid")
+        plt.rcParams.update(typography)
 
 
 def plot_track_error(track_rows_by_init, ccase, out_path):
@@ -408,10 +416,10 @@ def plot_track_error(track_rows_by_init, ccase, out_path):
                      ls="--", lw=1.8)
         axes[2].plot(valid, [r["vmax_err_kt"] for r in rows], color=colors[init],
                      marker="o", lw=1.8, label=label)
-    axes[0].set_ylabel("Position error (miles)")
-    axes[1].set_ylabel("Track-relative error (miles)")
-    axes[2].set_ylabel("Vmax error (kt)")
-    axes[2].set_xlabel("Valid time")
+    axes[0].set_ylabel("Position Error (mi)")
+    axes[1].set_ylabel("Track-Relative Error (mi)")
+    axes[2].set_ylabel("Vmax Error (kt)")
+    axes[2].set_xlabel("Valid Time")
     axes[1].axhline(0, color="gray", ls=":", lw=0.8)
     axes[2].axhline(0, color="gray", ls=":", lw=0.8)
     axes[0].legend(fontsize=8, ncol=2)
@@ -423,7 +431,8 @@ def plot_track_error(track_rows_by_init, ccase, out_path):
                    fontsize=8, frameon=True)
     for ax in axes:
         ax.grid(True, ls=":", alpha=0.4)
-    fig.suptitle(f"{ccase.storm_name} — {ccase.model_label} track skill by initialization")
+    fig.suptitle(
+        f"{ccase.storm_name} — {ccase.model_label} Track Skill by Initialization")
     fig.autofmt_xdate()
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
