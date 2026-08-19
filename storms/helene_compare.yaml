@@ -6,7 +6,7 @@ label: Hurricane Helene
 cases:
   - /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene/storms/helene_hfsa.yaml
   - /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene/storms/helene_hfsb.yaml
-best_track: /work2/noaa/aoml-hafs1/suchit/bal092024.dat
+best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
 
 # optional overrides:
 # thresholds_mm: [1, 5, 10, 25, 50, 75, 100, 150, 200, 250]

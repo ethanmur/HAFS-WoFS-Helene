@@ -11,7 +11,7 @@ data_available: true
 valid_start: 2024092600
 valid_end: 2024092800
 landfall_time: 202409270310
-best_track: /work2/noaa/aoml-hafs1/suchit/bal092024.dat
+best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
 storm_name: Hurricane Helene
 domain: [15.0, 42.0, -100.0, -60.0]
 mask_radius_km: 500
