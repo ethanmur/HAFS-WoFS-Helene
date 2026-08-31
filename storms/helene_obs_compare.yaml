@@ -1,0 +1,43 @@
+# Hurricane Helene — observation-vs-observation validation.
+#
+# No HAFS forecast involved: this checks that MRMS, Stage IV, and AORC agree
+# with each other before any of them is trusted as verification truth
+# elsewhere in this repo.
+#
+#   hourly comparison : MRMS vs AORC (both natively hourly)
+#   daily comparison   : Stage IV (native 24h, 12Z->12Z) vs MRMS and AORC
+#                        summed to match each Stage IV file's own window
+#
+# Run with:
+#   python analysis/run.py storms/helene_obs_compare.yaml obs-compare
+
+storm_name: Hurricane Helene
+best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
+
+valid_start: 2024092400
+valid_end:   2024092906
+
+# Wide field domain for the spatial map panels. The best track is drawn on
+# every map regardless of clipping. clip_outside_radius controls whether
+# data outside mask_radius_km is blanked (true) or shown (false, the
+# default) -- off here so a full-domain sanity check is the default view.
+domain: [15.0, 42.0, -100.0, -60.0]
+mask_radius_km: 500
+clip_outside_radius: false
+
+# Common grid for regridded products (anomaly maps, pooled 1:1 heatmaps) --
+# same convention as the rest of the repo (StormCase/CyclesCase default).
+grid_res: 0.05
+
+out_dir:          /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare
+mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache
+aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/noaa_aorc
+
+# First pass: validate AORC access and the MRMS-vs-AORC hourly comparison
+# alone. MRMS is already cached from the model-verification runs and Stage
+# IV isn't part of the hourly comparison, so both are skipped here -- flip
+# them to false once AORC checks out, to bring in the daily 3-way comparison.
+skip_mrms: true
+skip_stage4: true
+skip_aorc: false

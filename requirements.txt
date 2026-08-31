@@ -9,6 +9,8 @@ botocore
 cfgrib
 eccodes
 xarray
+zarr
+s3fs
 matplotlib
 cartopy
 seaborn

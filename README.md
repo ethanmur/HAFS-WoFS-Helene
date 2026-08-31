@@ -193,6 +193,58 @@ Existing comparison CSVs can be replotted without reopening GRIB files:
 python analysis/run.py storms/helene_compare.yaml replot
 ```
 
+## Compare observational datasets
+
+No HAFS forecast involved: validates MRMS, Stage IV, and AORC against each
+other before any of them is trusted as verification truth elsewhere in this
+repo. The best track is always drawn on every map; `clip_outside_radius`
+controls whether data outside `mask_radius_km` of it is blanked (`true`) or
+left visible (`false`, the default) — off by default so the full display
+domain is a sanity check against the raw product, not just the TC footprint.
+
+```yaml
+storm_name: Hurricane Helene
+best_track: /work2/.../bal092024.dat
+valid_start: 2024092400
+valid_end:   2024092906
+domain: [15.0, 42.0, -100.0, -60.0]
+mask_radius_km: 500
+clip_outside_radius: false   # true blanks data beyond mask_radius_km
+
+out_dir:          analysis/output/helene_obs_compare
+mrms_cache_dir:   /work2/.../mrms_cache
+stage4_cache_dir: /work2/.../stage4_cache
+aorc_cache_dir:   /work2/.../noaa_aorc
+
+skip_mrms: false
+skip_stage4: false
+skip_aorc: false
+```
+
+```bash
+python analysis/run.py storms/helene_obs_compare.yaml obs-compare
+```
+
+Two tiers, each individually skippable per source (`skip_mrms` /
+`skip_stage4` / `skip_aorc` — a skipped source is left out of every panel and
+pairing rather than erroring):
+
+- **Hourly** — MRMS vs AORC, both natively hourly.
+- **Daily** — Stage IV (native 24h, 12Z→12Z) vs MRMS and AORC summed over
+  that *same* 12Z→12Z window (not a calendar day), so the three-way
+  comparison is fair.
+
+Each tier produces, per timestep, a native-grid spatial map per source with
+the best track overlaid; per-timestep anomaly maps on the common grid for
+every available pair; and one pooled 1:1 hexbin heatmap per pair (RMSE/bias/r
+annotated) covering the whole window, plus a CSV of per-timestep paired
+stats.
+
+AORC (`s3://noaa-nws-aorc-v1-1-1km`, 1-km hourly, no AWS account needed) is
+one Zarr store per year rather than per-timestep files — opened lazily via
+`s3fs`/`xarray.open_zarr`, sliced to the requested hour, and cached locally
+as a small per-hour NetCDF so repeat runs never re-touch S3.
+
 ## Analysis viewer
 
 Browse generated cases locally:
@@ -251,6 +303,8 @@ analysis/
   rmse_scatter.py    per-run continuous verification
   cycles.py          fixed-window, multi-initialization analysis
   compare.py         HAFS-A versus HAFS-B analysis
+  obs_compare.py     MRMS/Stage IV/AORC observation-vs-observation analysis
+  aorc_common.py     NOAA AORC (Zarr, S3) access and per-hour caching
   skill_metrics.py   shared continuous and neighborhood metrics
   best_track.py      NHC b-deck parsing
   viewer.py          local/offline results gallery
