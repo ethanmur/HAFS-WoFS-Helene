@@ -319,7 +319,16 @@ def plot_compare(case, panels, end_fhour, out_path):
         else:
             ax.text(0.5, 0.5, "unavailable", ha="center", va="center",
                     transform=ax.transAxes)
-        ax.set_title(title)
+        # Cartopy GeoAxes titles set via ax.set_title() are frequently
+        # clipped by savefig(bbox_inches="tight") because get_tightbbox()
+        # under-measures GeoAxes decorations. A plain text artist in axes
+        # coordinates is measured correctly and never gets cut off.
+        ax.text(0.5, 1.05, title, transform=ax.transAxes,
+                ha="center", va="bottom", fontsize=11)
+        ax.text(0.5, -0.09, "Longitude", transform=ax.transAxes,
+                ha="center", va="top", fontsize=9)
+        ax.text(-0.1, 0.5, "Latitude", transform=ax.transAxes,
+                ha="center", va="center", rotation=90, fontsize=9)
 
     if cf is not None:
         plt.colorbar(cf, ax=axes, label="Accumulated precipitation (inches)",
