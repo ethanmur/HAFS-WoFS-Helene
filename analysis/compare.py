@@ -403,7 +403,16 @@ def plot_storm_total(sources, swath, grid_lat, grid_lon, grid_res, label,
             gl.left_labels = False
         st = accumulation_stats(field, swath, grid_lat, grid_res, thresholds_mm)
         stats[name] = st
-        ax.set_title(f"{name}\npeak {inches(st['max_mm']):.1f} in")
+        # ax.set_title() on a GeoAxes is frequently clipped by
+        # savefig(bbox_inches="tight"); a plain text artist in axes
+        # coordinates is measured correctly and never gets cut off.
+        ax.text(0.5, 1.10, f"{name}\npeak {inches(st['max_mm']):.1f} in",
+                transform=ax.transAxes, ha="center", va="bottom", fontsize=11)
+        ax.text(0.5, -0.12, "Longitude", transform=ax.transAxes,
+                ha="center", va="top", fontsize=9)
+        if i == 0:
+            ax.text(-0.14, 0.5, "Latitude", transform=ax.transAxes,
+                    ha="center", va="center", rotation=90, fontsize=9)
         map_axes.append(ax)
     fig.colorbar(mesh, ax=map_axes, shrink=0.85, extend="max",
                  label="Storm-total precipitation (inches)")

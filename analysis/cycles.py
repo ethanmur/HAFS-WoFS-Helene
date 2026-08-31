@@ -452,7 +452,15 @@ def plot_maps(ccase, fields, out_path):
         ax.contour(grid_lon, grid_lat, fields["swath"].astype(float),
                    levels=[0.5], colors="k", linewidths=1.0,
                    transform=ccrs.PlateCarree())
-        ax.set_title(title, fontsize=10)
+        # ax.set_title() on a GeoAxes is frequently clipped by
+        # savefig(bbox_inches="tight"); a plain text artist in axes
+        # coordinates is measured correctly and never gets cut off.
+        ax.text(0.5, 1.12, title, transform=ax.transAxes,
+                ha="center", va="bottom", fontsize=10)
+        ax.text(0.5, -0.08, "Longitude", transform=ax.transAxes,
+                ha="center", va="top", fontsize=8)
+        ax.text(-0.12, 0.5, "Latitude", transform=ax.transAxes,
+                ha="center", va="center", rotation=90, fontsize=8)
     for ax in flat[n:]:
         ax.set_visible(False)
     if cf is not None:
