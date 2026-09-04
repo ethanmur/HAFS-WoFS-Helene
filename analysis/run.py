@@ -12,13 +12,14 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
   compare HFSA-vs-HFSB rainfall comparison (takes a comparison YAML)
   replot  redraw the comparison figures from existing CSVs (no recompute)
   ml      pooled ML regime diagnostics over a feature CSV
-  download-obs  fetch/cache MRMS, Stage IV, and AORC obs only -- no
-                regridding or plotting; run this on a login node
-                (takes an obs-compare YAML)
-  obs-compare   MRMS/Stage IV/AORC observation-vs-observation comparison,
-                no HAFS forecast involved; reads the cache only and never
-                downloads -- errors immediately if something download-obs
-                should have fetched is missing (takes an obs-compare YAML)
+  download-obs  fetch/cache MRMS and AORC obs only -- no regridding or
+                plotting; run this on a login node. Stage IV hourly data is
+                NOT fetched here (see analysis/stage4_hourly.py); place it
+                in the cache yourself (takes an obs-compare YAML)
+  obs-compare   MRMS/Stage IV/AORC hourly observation-vs-observation
+                comparison, no HAFS forecast involved; reads the cache only
+                and never downloads -- errors immediately if anything
+                needed is missing (takes an obs-compare YAML)
 """
 
 import sys

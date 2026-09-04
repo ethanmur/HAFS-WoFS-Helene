@@ -213,7 +213,7 @@ clip_outside_radius: false   # true blanks data beyond mask_radius_km
 
 out_dir:          analysis/output/helene_obs_compare
 mrms_cache_dir:   /work2/.../mrms_cache
-stage4_cache_dir: /work2/.../stage4_cache
+stage4_cache_dir: /work2/.../stage4_cache_hourly
 aorc_cache_dir:   /work2/.../noaa_aorc
 
 skip_mrms: false
@@ -225,31 +225,31 @@ Downloading and comparing are two separate commands, so a no-internet compute
 node can run the comparison against data a login node already fetched:
 
 ```bash
-# On a login node (has internet): fetch and cache raw MRMS/Stage IV/AORC
-# only -- no regridding, no plotting, sequential requests only.
+# On a login node (has internet): fetch and cache raw MRMS/AORC only -- no
+# regridding, no plotting, sequential requests only. Stage IV hourly data
+# is NOT fetched here -- place ST4.<YYYYMMDD> files under stage4_cache_dir
+# yourself (see analysis/stage4_hourly.py) before running obs-compare.
 python analysis/run.py storms/helene_obs_compare.yaml download-obs
 
 # On a compute node (no internet): reads the cache only, never downloads.
-# If anything download-obs should have fetched is missing, this prints
-# exactly what's missing and exits immediately rather than attempting
-# a fetch or silently producing a partial comparison.
+# If anything is missing, this prints exactly what's missing and exits
+# immediately rather than attempting a fetch or silently producing a
+# partial comparison.
 python analysis/run.py storms/helene_obs_compare.yaml obs-compare
 ```
 
-Two tiers, each individually skippable per source (`skip_mrms` /
-`skip_stage4` / `skip_aorc` — a skipped source is left out of every panel and
-pairing rather than erroring):
+All three sources are compared natively hourly, each individually skippable
+(`skip_mrms` / `skip_stage4` / `skip_aorc` — a skipped source is left out of
+every panel and pairing rather than erroring). Stage IV hourly values come
+from NCEP's own `ST4.<YYYYMMDD>` archive files, which bundle a file's 1h
+message alongside its 6h/24h ones for every hour of the day; `stage4_hourly.py`
+reads only the 1h messages, keyed by each message's GRIB-decoded
+accumulation-end time (the same hour-end convention MRMS/AORC already use).
 
-- **Hourly** — MRMS vs AORC, both natively hourly.
-- **Daily** — Stage IV (native 24h, 12Z→12Z) vs MRMS and AORC summed over
-  that *same* 12Z→12Z window (not a calendar day), so the three-way
-  comparison is fair.
-
-Each tier produces, per timestep, a native-grid spatial map per source with
-the best track overlaid; per-timestep anomaly maps on the common grid for
-every available pair; and one pooled 1:1 hexbin heatmap per pair (RMSE/bias/r
-annotated) covering the whole window, plus a CSV of per-timestep paired
-stats.
+Per hour, this produces a native-grid spatial map per source with the best
+track overlaid; an anomaly map on the common grid for every available pair;
+and one pooled 1:1 hexbin heatmap per pair (RMSE/bias/r annotated) covering
+the whole window, plus a CSV of per-hour paired stats.
 
 AORC (`s3://noaa-nws-aorc-v1-1-1km`, 1-km hourly, no AWS account needed) is
 one Zarr store per year rather than per-timestep files — opened lazily via
@@ -316,6 +316,7 @@ analysis/
   compare.py         HAFS-A versus HAFS-B analysis
   obs_compare.py     MRMS/Stage IV/AORC observation-vs-observation analysis
   aorc_common.py     NOAA AORC (Zarr, S3) access and per-hour caching
+  stage4_hourly.py   NCEP ST4.<day> hourly Stage IV access (cache-only)
   skill_metrics.py   shared continuous and neighborhood metrics
   best_track.py      NHC b-deck parsing
   viewer.py          local/offline results gallery

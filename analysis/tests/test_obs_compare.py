@@ -16,10 +16,11 @@ import yaml
 
 from obs_compare import (
     ObsCompareCase, from_yaml, swath_mask, case_swath_mask, track_segment,
-    hourly_timestamps, daily_windows, download_window, check_cache_complete,
+    hourly_timestamps, check_cache_complete,
 )
 from hafs_common import mrms_s3_key
 import aorc_common
+import stage4_hourly
 
 
 _TRACK = [
@@ -103,30 +104,6 @@ def test_hourly_timestamps_end_of_hour_convention():
                  datetime(2024, 9, 26, 3)]
 
 
-def test_daily_windows_matches_stage4_12z_convention():
-    with tempfile.TemporaryDirectory() as tmp:
-        cache = Path(tmp)
-        # Only the 26th and 28th have a Stage IV 24h file on disk.
-        (cache / "conus_20240926_24h.grb2").touch()
-        (cache / "conus_20240928_24h.grb2").touch()
-        windows = daily_windows(cache, datetime(2024, 9, 25, 0),
-                                datetime(2024, 9, 28, 6))
-        keys = [w[0] for w in windows]
-        assert keys == ["20240926", "20240928"]
-        _, w0, w1, _ = windows[0]
-        # 24h file for the 26th is valid 12Z(25th) -> 12Z(26th), not
-        # calendar-day 00Z(26th) -> 00Z(27th).
-        assert w0 == datetime(2024, 9, 25, 12)
-        assert w1 == datetime(2024, 9, 26, 12)
-
-
-def test_daily_windows_skips_missing_days():
-    with tempfile.TemporaryDirectory() as tmp:
-        windows = daily_windows(Path(tmp), datetime(2024, 9, 25, 0),
-                                datetime(2024, 9, 26, 0))
-        assert windows == []
-
-
 def test_from_yaml_round_trip_and_defaults():
     with tempfile.TemporaryDirectory() as tmp:
         yaml_path = Path(tmp) / "case.yaml"
@@ -177,28 +154,6 @@ def _touch_aorc(cache_dir, valid_dt):
     path.touch()
 
 
-def test_download_window_matches_valid_range_when_stage4_skipped():
-    with tempfile.TemporaryDirectory() as tmp:
-        case = _minimal_case(skip_stage4=True, stage4_cache_dir=Path(tmp))
-        assert download_window(case) == (case.valid_start, case.valid_end)
-
-
-def test_download_window_widens_to_cover_daily_windows():
-    with tempfile.TemporaryDirectory() as tmp:
-        cache = Path(tmp)
-        (cache / "conus_20240926_24h.grb2").touch()
-        case = _minimal_case(
-            skip_stage4=False, stage4_cache_dir=cache,
-            valid_start=datetime(2024, 9, 26, 0),
-            valid_end=datetime(2024, 9, 26, 6),
-        )
-        fetch_start, fetch_end = download_window(case)
-        # the 26th's 24h window is 12Z(25th) -> 12Z(26th), which starts
-        # well before valid_start=00Z(26th).
-        assert fetch_start == datetime(2024, 9, 25, 12)
-        assert fetch_end == datetime(2024, 9, 26, 12)
-
-
 def test_check_cache_complete_empty_when_everything_cached():
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -231,23 +186,71 @@ def test_check_cache_complete_flags_missing_hours():
         assert any("AORC" in m and "01Z" in m for m in missing)
 
 
-def test_check_cache_complete_flags_missing_stage4_day():
+def test_check_cache_complete_flags_missing_stage4_hours(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         case = _minimal_case(
             skip_stage4=False, skip_mrms=True, skip_aorc=True,
             stage4_cache_dir=Path(tmp),
             valid_start=datetime(2024, 9, 26, 0),
-            valid_end=datetime(2024, 9, 26, 6),
+            valid_end=datetime(2024, 9, 26, 3),
+        )
+        # Only hour 2 is "in the cache" -- fake the parsed ST4.<day> index
+        # so this test doesn't need a real GRIB fixture.
+        monkeypatch.setattr(
+            stage4_hourly, "index_stage4_hourly",
+            lambda cache_dir_str: {datetime(2024, 9, 26, 2): Path(tmp) / "ST4.20240926"},
         )
         missing = check_cache_complete(case)
-        assert len(missing) == 1
-        assert "20240926" in missing[0]
+        assert len(missing) == 2   # hours 1 and 3 missing
+        assert any("01Z" in m for m in missing)
+        assert any("03Z" in m for m in missing)
+        assert not any("02Z" in m for m in missing)
+
+
+def test_check_cache_complete_empty_when_stage4_cached(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        case = _minimal_case(
+            skip_stage4=False, skip_mrms=True, skip_aorc=True,
+            stage4_cache_dir=Path(tmp),
+            valid_start=datetime(2024, 9, 26, 0),
+            valid_end=datetime(2024, 9, 26, 2),
+        )
+        fake_path = Path(tmp) / "ST4.20240926"
+        monkeypatch.setattr(
+            stage4_hourly, "index_stage4_hourly",
+            lambda cache_dir_str: {
+                datetime(2024, 9, 26, 1): fake_path,
+                datetime(2024, 9, 26, 2): fake_path,
+            },
+        )
+        assert check_cache_complete(case) == []
+
+
+class _FakeMonkeypatch:
+    """Minimal stand-in so this file also runs standalone (no pytest)."""
+
+    def __init__(self):
+        self._saved = []
+
+    def setattr(self, obj, name, value):
+        self._saved.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def undo(self):
+        for obj, name, value in reversed(self._saved):
+            setattr(obj, name, value)
 
 
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
-        fn()
+        needs_mp = "monkeypatch" in fn.__code__.co_varnames[:fn.__code__.co_argcount]
+        mp = _FakeMonkeypatch() if needs_mp else None
+        try:
+            fn(mp) if needs_mp else fn()
+        finally:
+            if mp is not None:
+                mp.undo()
         print(f"PASS {fn.__name__}")
     print(f"\n{len(fns)} passed")
 

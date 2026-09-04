@@ -2,11 +2,11 @@
 #
 # No HAFS forecast involved: this checks that MRMS, Stage IV, and AORC agree
 # with each other before any of them is trusted as verification truth
-# elsewhere in this repo.
+# elsewhere in this repo. All three are compared natively hourly.
 #
-#   hourly comparison : MRMS vs AORC (both natively hourly)
-#   daily comparison   : Stage IV (native 24h, 12Z->12Z) vs MRMS and AORC
-#                        summed to match each Stage IV file's own window
+# Stage IV hourly data (ST4.<YYYYMMDD> files) is NOT fetched by
+# download-obs -- place it under stage4_cache_dir yourself before running
+# obs-compare; see analysis/stage4_hourly.py.
 #
 # Run with:
 #   python analysis/run.py storms/helene_obs_compare.yaml obs-compare
@@ -34,13 +34,11 @@ grid_res: 0.05
 
 out_dir:          /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
-stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache_hourly
 aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/aorc_cache
 
-# First pass: validate AORC access and the MRMS-vs-AORC hourly comparison
-# alone. MRMS is already cached from the model-verification runs and Stage
-# IV isn't part of the hourly comparison, so both are skipped here -- flip
-# them to false once AORC checks out, to bring in the daily 3-way comparison.
+# MRMS is already cached from the model-verification runs; flip to false
+# once you also want it in the 3-way hourly comparison.
 skip_mrms: true
-skip_stage4: true
+skip_stage4: false
 skip_aorc: false
