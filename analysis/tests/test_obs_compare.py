@@ -16,8 +16,10 @@ import yaml
 
 from obs_compare import (
     ObsCompareCase, from_yaml, swath_mask, case_swath_mask, track_segment,
-    hourly_timestamps, daily_windows,
+    hourly_timestamps, daily_windows, download_window, check_cache_complete,
 )
+from hafs_common import mrms_s3_key
+import aorc_common
 
 
 _TRACK = [
@@ -160,6 +162,86 @@ def test_from_yaml_requires_core_fields():
             assert False, "expected a KeyError for the missing fields"
         except KeyError:
             pass
+
+
+def _touch_mrms(cache_dir, valid_dt):
+    _, fname = mrms_s3_key(valid_dt)
+    (Path(cache_dir) / fname.replace(".gz", "")).parent.mkdir(
+        parents=True, exist_ok=True)
+    (Path(cache_dir) / fname.replace(".gz", "")).touch()
+
+
+def _touch_aorc(cache_dir, valid_dt):
+    path = aorc_common.aorc_cache_path(cache_dir, valid_dt)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def test_download_window_matches_valid_range_when_stage4_skipped():
+    with tempfile.TemporaryDirectory() as tmp:
+        case = _minimal_case(skip_stage4=True, stage4_cache_dir=Path(tmp))
+        assert download_window(case) == (case.valid_start, case.valid_end)
+
+
+def test_download_window_widens_to_cover_daily_windows():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = Path(tmp)
+        (cache / "conus_20240926_24h.grb2").touch()
+        case = _minimal_case(
+            skip_stage4=False, stage4_cache_dir=cache,
+            valid_start=datetime(2024, 9, 26, 0),
+            valid_end=datetime(2024, 9, 26, 6),
+        )
+        fetch_start, fetch_end = download_window(case)
+        # the 26th's 24h window is 12Z(25th) -> 12Z(26th), which starts
+        # well before valid_start=00Z(26th).
+        assert fetch_start == datetime(2024, 9, 25, 12)
+        assert fetch_end == datetime(2024, 9, 26, 12)
+
+
+def test_check_cache_complete_empty_when_everything_cached():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        case = _minimal_case(
+            skip_stage4=True, mrms_cache_dir=base / "mrms",
+            aorc_cache_dir=base / "aorc",
+            valid_start=datetime(2024, 9, 26, 0),
+            valid_end=datetime(2024, 9, 26, 2),
+        )
+        for t in hourly_timestamps(case.valid_start, case.valid_end):
+            _touch_mrms(case.mrms_cache_dir, t)
+            _touch_aorc(case.aorc_cache_dir, t)
+        assert check_cache_complete(case) == []
+
+
+def test_check_cache_complete_flags_missing_hours():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        case = _minimal_case(
+            skip_stage4=True, mrms_cache_dir=base / "mrms",
+            aorc_cache_dir=base / "aorc",
+            valid_start=datetime(2024, 9, 26, 0),
+            valid_end=datetime(2024, 9, 26, 2),
+        )
+        # Only cache one of the two needed hours, and only for MRMS.
+        _touch_mrms(case.mrms_cache_dir, datetime(2024, 9, 26, 1))
+        missing = check_cache_complete(case)
+        assert len(missing) == 3   # MRMS h2, AORC h1, AORC h2
+        assert any("MRMS" in m and "02Z" in m for m in missing)
+        assert any("AORC" in m and "01Z" in m for m in missing)
+
+
+def test_check_cache_complete_flags_missing_stage4_day():
+    with tempfile.TemporaryDirectory() as tmp:
+        case = _minimal_case(
+            skip_stage4=False, skip_mrms=True, skip_aorc=True,
+            stage4_cache_dir=Path(tmp),
+            valid_start=datetime(2024, 9, 26, 0),
+            valid_end=datetime(2024, 9, 26, 6),
+        )
+        missing = check_cache_complete(case)
+        assert len(missing) == 1
+        assert "20240926" in missing[0]
 
 
 def _run_all():

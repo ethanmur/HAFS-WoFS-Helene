@@ -1,6 +1,6 @@
 """Single entry point for the HAFS QPF/ETS framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|obs-compare]
+    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|download-obs|obs-compare]
 
 Loads a StormCase from the YAML case file and runs the requested product(s):
   parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
@@ -12,8 +12,13 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
   compare HFSA-vs-HFSB rainfall comparison (takes a comparison YAML)
   replot  redraw the comparison figures from existing CSVs (no recompute)
   ml      pooled ML regime diagnostics over a feature CSV
-  obs-compare  MRMS/Stage IV/AORC observation-vs-observation comparison, no
-               HAFS forecast involved (takes an obs-compare YAML)
+  download-obs  fetch/cache MRMS, Stage IV, and AORC obs only -- no
+                regridding or plotting; run this on a login node
+                (takes an obs-compare YAML)
+  obs-compare   MRMS/Stage IV/AORC observation-vs-observation comparison,
+                no HAFS forecast involved; reads the cache only and never
+                downloads -- errors immediately if something download-obs
+                should have fetched is missing (takes an obs-compare YAML)
 """
 
 import sys
@@ -22,14 +27,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
-            "compare", "replot", "ml", "obs-compare")
+            "compare", "replot", "ml", "download-obs", "obs-compare")
 
 
 def parse_args(argv):
     """(yaml_path, command) from argv; command defaults to 'all'."""
     if not argv:
         print("usage: run.py <case.yaml> "
-              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|obs-compare]")
+              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|download-obs|obs-compare]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -59,9 +64,15 @@ def dispatch(case, command):
 
 def main(argv):
     yaml_path, command = parse_args(argv)
-    if command == "obs-compare":
-        from obs_compare import from_yaml as obs_from_yaml, run_obs_compare
-        run_obs_compare(obs_from_yaml(yaml_path))
+    if command in ("download-obs", "obs-compare"):
+        from obs_compare import from_yaml as obs_from_yaml
+        obs_case = obs_from_yaml(yaml_path)
+        if command == "download-obs":
+            from obs_compare import download_obs
+            download_obs(obs_case)
+        else:
+            from obs_compare import run_obs_compare
+            run_obs_compare(obs_case)
         return
     if command == "ml":
         from ml_regime import load_ml_config, run_ml

@@ -18,7 +18,7 @@ import numpy as np
 import aorc_common
 
 
-def _fake_load_aorc_hour(fs, valid_dt, domain, cache_dir):
+def _fake_load_aorc_hour(valid_dt, domain, cache_dir, download=True):
     lat = np.array([25.0, 26.0])
     lon = np.array([-85.0, -84.0])
     # 1 mm/hour everywhere, plus the hour-of-day so the sum is checkable.
@@ -29,7 +29,7 @@ def _fake_load_aorc_hour(fs, valid_dt, domain, cache_dir):
 def test_sum_aorc_hours_matches_manual_sum(monkeypatch):
     monkeypatch.setattr(aorc_common, "load_aorc_hour", _fake_load_aorc_hour)
     lat, lon, total = aorc_common.sum_aorc_hours(
-        fs=None, window_start=datetime(2024, 9, 26, 10),
+        window_start=datetime(2024, 9, 26, 10),
         window_end=datetime(2024, 9, 26, 13), domain=(0, 0, 0, 0),
         cache_dir="/unused",
     )
@@ -44,12 +44,30 @@ def test_sum_aorc_hours_raises_when_nothing_loads(monkeypatch):
     monkeypatch.setattr(aorc_common, "load_aorc_hour", _always_fail)
     try:
         aorc_common.sum_aorc_hours(
-            fs=None, window_start=datetime(2024, 9, 26, 0),
+            window_start=datetime(2024, 9, 26, 0),
             window_end=datetime(2024, 9, 26, 3), domain=(0, 0, 0, 0),
             cache_dir="/unused",
         )
         assert False, "expected a RuntimeError"
     except RuntimeError:
+        pass
+
+
+def test_sum_aorc_hours_reraises_file_not_found_without_swallowing(monkeypatch):
+    """A cache miss under download=False must abort the whole sum, not be
+    silently skipped like a transient fetch error -- a partial daily total
+    would look valid but be quietly wrong."""
+    def _missing(*args, **kwargs):
+        raise FileNotFoundError("not cached")
+    monkeypatch.setattr(aorc_common, "load_aorc_hour", _missing)
+    try:
+        aorc_common.sum_aorc_hours(
+            window_start=datetime(2024, 9, 26, 0),
+            window_end=datetime(2024, 9, 26, 3), domain=(0, 0, 0, 0),
+            cache_dir="/unused", download=False,
+        )
+        assert False, "expected a FileNotFoundError"
+    except FileNotFoundError:
         pass
 
 

@@ -221,7 +221,18 @@ skip_stage4: false
 skip_aorc: false
 ```
 
+Downloading and comparing are two separate commands, so a no-internet compute
+node can run the comparison against data a login node already fetched:
+
 ```bash
+# On a login node (has internet): fetch and cache raw MRMS/Stage IV/AORC
+# only -- no regridding, no plotting, sequential requests only.
+python analysis/run.py storms/helene_obs_compare.yaml download-obs
+
+# On a compute node (no internet): reads the cache only, never downloads.
+# If anything download-obs should have fetched is missing, this prints
+# exactly what's missing and exits immediately rather than attempting
+# a fetch or silently producing a partial comparison.
 python analysis/run.py storms/helene_obs_compare.yaml obs-compare
 ```
 

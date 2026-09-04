@@ -39,7 +39,7 @@ from botocore import UNSIGNED
 from botocore.config import Config
 import boto3
 
-from hafs_common import QPF_LEVELS, haversine_km, load_mrms_hour
+from hafs_common import QPF_LEVELS, haversine_km, load_mrms_hour, mrms_s3_key
 from hafs_case import make_fixed_grid, position_on_track
 from best_track import parse_bdeck
 from parent_qpf import (
@@ -308,17 +308,22 @@ def hourly_timestamps(t0, t1):
     return [t0 + timedelta(hours=h) for h in range(1, n_hours + 1)]
 
 
-def sum_mrms_hours(s3, window_start, window_end, cache_dir, label=""):
+def sum_mrms_hours(s3, window_start, window_end, cache_dir, label="",
+                   download=True):
     """Sum MRMS hourly QPE over (window_start, window_end] on its native
     grid. Same end-of-hour convention as load_mrms_hour; mirrors
     aorc_common.sum_aorc_hours so a Stage IV 24h window can be matched
-    exactly by both. Returns (lat1d, lon1d, total_mm)."""
+    exactly by both. Returns (lat1d, lon1d, total_mm); raises
+    FileNotFoundError immediately if download=False and any hour is
+    missing (a partial daily sum would be silently wrong)."""
     n_hours = int(round((window_end - window_start).total_seconds() / 3600))
     total = lat = lon = None
     for h in range(1, n_hours + 1):
         t = window_start + timedelta(hours=h)
         try:
-            la, lo, data = load_mrms_hour(s3, t, cache_dir)
+            la, lo, data = load_mrms_hour(s3, t, cache_dir, download=download)
+        except FileNotFoundError:
+            raise
         except Exception as e:
             print(f"  MRMS {label}h{h:03d} unavailable: {e}")
             continue
@@ -345,30 +350,34 @@ def run_hourly_comparison(case):
     hourly_dir.mkdir(parents=True, exist_ok=True)
 
     track = parse_bdeck(case.best_track)
+    print(f"Best track: {len(track)} fixes from {case.best_track}", flush=True)
     grid_lat, grid_lon = case.fixed_grid()
+    print(f"Common grid: {grid_lat.shape} at {case.grid_res} deg", flush=True)
     grid_swath = case_swath_mask(case, track, grid_lat, grid_lon,
                                  case.valid_start, case.valid_end)
 
-    s3 = boto3.client("s3", region_name="us-east-1",
-                      config=Config(signature_version=UNSIGNED))
-    aorc_fs = aorc_common.aorc_filesystem() if not case.skip_aorc else None
+    timestamps = hourly_timestamps(case.valid_start, case.valid_end)
+    print(f"Reading {len(timestamps)} cached hour(s): "
+         f"{timestamps[0]:%Y-%m-%d %HZ} -> {timestamps[-1]:%Y-%m-%d %HZ}",
+         flush=True)
 
     pooled_mrms, pooled_aorc = [], []
     csv_rows = []
-    for t in hourly_timestamps(case.valid_start, case.valid_end):
+    for t in timestamps:
         mlat = mlon = mdata = None
         alat = alon = adata = None
         if not case.skip_mrms:
             try:
-                mlat, mlon, mdata = load_mrms_hour(s3, t, case.mrms_cache_dir)
+                mlat, mlon, mdata = load_mrms_hour(
+                    None, t, case.mrms_cache_dir, download=False)
             except Exception as e:
-                print(f"  {t:%Y-%m-%d %HZ} MRMS unavailable: {e}")
+                print(f"  {t:%Y-%m-%d %HZ} MRMS unavailable: {e}", flush=True)
         if not case.skip_aorc:
             try:
                 alat, alon, adata = aorc_common.load_aorc_hour(
-                    aorc_fs, t, case.domain, case.aorc_cache_dir)
+                    t, case.domain, case.aorc_cache_dir, download=False)
             except Exception as e:
-                print(f"  {t:%Y-%m-%d %HZ} AORC unavailable: {e}")
+                print(f"  {t:%Y-%m-%d %HZ} AORC unavailable: {e}", flush=True)
         if mdata is None and adata is None:
             continue
 
@@ -411,7 +420,7 @@ def run_hourly_comparison(case):
             stats = continuous_scores(mreg[valid], areg[valid])
             csv_rows.append({"valid": f"{t:%Y-%m-%d %H:%M}", **stats})
         print(f"  {t:%Y-%m-%d %HZ}  MRMS={'ok' if mdata is not None else '--'}"
-             f"  AORC={'ok' if adata is not None else '--'}")
+             f"  AORC={'ok' if adata is not None else '--'}", flush=True)
 
     if pooled_mrms:
         pooled_heatmap(
@@ -474,16 +483,14 @@ def run_daily_comparison(case):
     grid_swath = case_swath_mask(case, track, grid_lat, grid_lon,
                                  case.valid_start, case.valid_end)
 
-    ensure_stage4_files(case.valid_start, case.valid_end, case.stage4_cache_dir)
+    # No ensure_stage4_files call here -- obs-compare reads whatever
+    # download-obs already cached and never fetches on its own.
     windows = daily_windows(case.stage4_cache_dir, case.valid_start,
                             case.valid_end)
     if not windows:
-        print("No Stage IV 24h files found for this window.")
+        print("No cached Stage IV 24h files found for this window.")
         return
 
-    s3 = boto3.client("s3", region_name="us-east-1",
-                      config=Config(signature_version=UNSIGNED))
-    aorc_fs = aorc_common.aorc_filesystem() if not case.skip_aorc else None
     pair_names = [("Stage IV", "MRMS"), ("Stage IV", "AORC"), ("MRMS", "AORC")]
     pooled = {p: ([], []) for p in pair_names}
     csv_rows = []
@@ -493,25 +500,26 @@ def run_daily_comparison(case):
         try:
             slat, slon, sdata = read_stage4(path)
         except Exception as e:
-            print(f"  {key} Stage IV read failed: {e}")
+            print(f"  {key} Stage IV read failed: {e}", flush=True)
 
         mlat = mlon = mdata = None
         if not case.skip_mrms:
             try:
                 mlat, mlon, mdata = sum_mrms_hours(
-                    s3, w0, w1, case.mrms_cache_dir, label=f"{key} ")
+                    None, w0, w1, case.mrms_cache_dir, label=f"{key} ",
+                    download=False)
             except Exception as e:
-                print(f"  {key} MRMS 24h sum unavailable: {e}")
+                print(f"  {key} MRMS 24h sum unavailable: {e}", flush=True)
 
         adata = None
         alat = alon = None
         if not case.skip_aorc:
             try:
                 alat, alon, adata = aorc_common.sum_aorc_hours(
-                    aorc_fs, w0, w1, case.domain, case.aorc_cache_dir,
-                    label=f"{key} ")
+                    w0, w1, case.domain, case.aorc_cache_dir,
+                    label=f"{key} ", download=False)
             except Exception as e:
-                print(f"  {key} AORC 24h sum unavailable: {e}")
+                print(f"  {key} AORC 24h sum unavailable: {e}", flush=True)
 
         if sdata is None and mdata is None and adata is None:
             continue
@@ -563,7 +571,7 @@ def run_daily_comparison(case):
             )
         print(f"  {key} ({window_label})  Stage IV={'ok' if sdata is not None else '--'}"
              f"  MRMS={'ok' if mdata is not None else '--'}"
-             f"  AORC={'ok' if adata is not None else '--'}")
+             f"  AORC={'ok' if adata is not None else '--'}", flush=True)
 
     heatmap_pairs = [
         (a, b, np.concatenate(va) if va else np.array([]),
@@ -587,8 +595,127 @@ def run_daily_comparison(case):
 
 
 # =============================================================================
-# Entry point
+# Download (login node) -- data only, no regridding, no plotting
 # =============================================================================
+
+def download_window(case):
+    """(fetch_start, fetch_end): the full hourly span needed for BOTH the
+    hourly comparison and the daily comparison's MRMS/AORC sums -- each
+    Stage IV 24h window can start up to 12h before valid_start or end up
+    to 12h after valid_end, so a plain [valid_start, valid_end] fetch can
+    undershoot what the daily comparison needs.
+
+    Reads whatever Stage IV files are already in stage4_cache_dir; call
+    this after fetching Stage IV (download_obs does), not before, or the
+    widening silently does nothing on a first-ever run.
+    """
+    fetch_start, fetch_end = case.valid_start, case.valid_end
+    if not case.skip_stage4:
+        for _, w0, w1, _ in daily_windows(case.stage4_cache_dir,
+                                          case.valid_start, case.valid_end):
+            fetch_start = min(fetch_start, w0)
+            fetch_end = max(fetch_end, w1)
+    return fetch_start, fetch_end
+
+
+def download_obs(case):
+    """Login-node command: populate the raw caches only.
+
+    No regridding, no masking, no plotting, no matplotlib work -- just
+    sequential (never concurrent) requests to Stage IV / MRMS / AORC, so
+    this stays gentle on a login node. obs-compare (the compute-node
+    command) never downloads on its own; run this first.
+    """
+    print(f"Download obs: {case.storm_name}")
+    print(f"Window: {case.valid_start:%Y-%m-%d %HZ} -> "
+         f"{case.valid_end:%Y-%m-%d %HZ}")
+    print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
+         f"skip_aorc={case.skip_aorc}")
+
+    if not case.skip_stage4:
+        print("\nStage IV: fetching daily 24h tars...", flush=True)
+        ensure_stage4_files(case.valid_start, case.valid_end,
+                            case.stage4_cache_dir)
+        n = len(daily_windows(case.stage4_cache_dir, case.valid_start,
+                              case.valid_end))
+        print(f"  {n} day(s) available in cache.", flush=True)
+
+    if case.skip_mrms and case.skip_aorc:
+        print("\nskip_mrms and skip_aorc both set -- nothing more to fetch.")
+        return
+
+    fetch_start, fetch_end = download_window(case)
+    widened = (fetch_start, fetch_end) != (case.valid_start, case.valid_end)
+    timestamps = hourly_timestamps(fetch_start, fetch_end)
+    print(f"\nMRMS/AORC: fetching {len(timestamps)} hour(s) "
+         f"{timestamps[0]:%Y-%m-%d %HZ} -> {timestamps[-1]:%Y-%m-%d %HZ}"
+         + (" (widened to cover the daily comparison's 24h windows)"
+            if widened else ""), flush=True)
+
+    s3 = (boto3.client("s3", region_name="us-east-1",
+                       config=Config(signature_version=UNSIGNED))
+         if not case.skip_mrms else None)
+    for t in timestamps:
+        if case.skip_mrms:
+            mstatus = "skipped"
+        else:
+            try:
+                load_mrms_hour(s3, t, case.mrms_cache_dir, download=True)
+                mstatus = "ok"
+            except Exception as e:
+                mstatus = f"FAILED ({e})"
+        if case.skip_aorc:
+            astatus = "skipped"
+        else:
+            try:
+                aorc_common.load_aorc_hour(t, case.domain,
+                                           case.aorc_cache_dir, download=True)
+                astatus = "ok"
+            except Exception as e:
+                astatus = f"FAILED ({e})"
+        print(f"  {t:%Y-%m-%d %HZ}  MRMS={mstatus}  AORC={astatus}",
+             flush=True)
+
+    print("\nDownload complete.")
+
+
+# =============================================================================
+# Entry point (compute node) -- reads the cache only, never downloads
+# =============================================================================
+
+def check_cache_complete(case):
+    """List of human-readable missing-item strings; empty means every file
+    obs-compare will need is already cached. Pure path/glob checks -- never
+    touches the network, so it's safe on a no-internet compute node and
+    fast enough to run unconditionally before any real work starts."""
+    missing = []
+
+    if not case.skip_stage4:
+        stage4_idx = index_stage4_24h_conus(case.stage4_cache_dir)
+        day = case.valid_start.date()
+        while day <= case.valid_end.date():
+            key = day.strftime("%Y%m%d")
+            if key not in stage4_idx:
+                missing.append(f"Stage IV 24h file for {key} "
+                               f"(expected under {case.stage4_cache_dir})")
+            day += timedelta(days=1)
+
+    if not (case.skip_mrms and case.skip_aorc):
+        fetch_start, fetch_end = download_window(case)
+        for t in hourly_timestamps(fetch_start, fetch_end):
+            if not case.skip_mrms:
+                _, fname = mrms_s3_key(t)
+                path = case.mrms_cache_dir / fname.replace(".gz", "")
+                if not path.exists():
+                    missing.append(f"MRMS hour {t:%Y-%m-%d %HZ} "
+                                   f"(expected {path})")
+            if not case.skip_aorc:
+                path = aorc_common.aorc_cache_path(case.aorc_cache_dir, t)
+                if not path.exists():
+                    missing.append(f"AORC hour {t:%Y-%m-%d %HZ} "
+                                   f"(expected {path})")
+    return missing
+
 
 def run_obs_compare(case):
     case.out_dir.mkdir(parents=True, exist_ok=True)
@@ -597,6 +724,18 @@ def run_obs_compare(case):
          f"{case.valid_end:%Y-%m-%d %HZ}")
     print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
          f"skip_aorc={case.skip_aorc}")
+
+    missing = check_cache_complete(case)
+    if missing:
+        print("\nERROR: required data is not cached, and obs-compare does "
+             "not download it. Run this first (on a node with internet):\n"
+             "  python analysis/run.py <yaml> download-obs\n")
+        for item in missing[:25]:
+            print(f"  missing: {item}")
+        if len(missing) > 25:
+            print(f"  ... and {len(missing) - 25} more")
+        raise SystemExit(1)
+
     run_hourly_comparison(case)
     run_daily_comparison(case)
 

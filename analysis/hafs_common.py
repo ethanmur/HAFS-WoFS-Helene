@@ -338,12 +338,20 @@ def mrms_s3_key(hour_end_dt):
     return f"CONUS/{MRMS_PRODUCT}/{date_str}/{fname}", fname
 
 
-def load_mrms_hour(s3, hour_end_dt, cache_dir):
+def load_mrms_hour(s3, hour_end_dt, cache_dir, download=True):
+    """(lat, lon, data) for one MRMS hour. On a cache miss: downloads from
+    S3 when `download` is True (the default); raises FileNotFoundError
+    instead of touching `s3` when `download` is False, for callers that
+    must not download (e.g. a no-internet compute node)."""
     cache_dir = Path(cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
     key, fname = mrms_s3_key(hour_end_dt)
     cache_path = cache_dir / fname.replace(".gz", "")
     if not cache_path.exists():
+        if not download:
+            raise FileNotFoundError(
+                f"MRMS hour not cached: {cache_path} -- obs-compare does "
+                f"not download; run 'download-obs' for this case first.")
+        cache_dir.mkdir(parents=True, exist_ok=True)
         gz_buf = io.BytesIO()
         s3.download_fileobj(MRMS_BUCKET, key, gz_buf)
         gz_buf.seek(0)
