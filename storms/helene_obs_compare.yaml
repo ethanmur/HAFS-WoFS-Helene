@@ -14,8 +14,11 @@
 storm_name: Hurricane Helene
 best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
 
-valid_start: 2024092400
-valid_end:   2024092906
+valid_start: 2024092500
+valid_end: 2024092600
+
+# 2024092400
+# 2024092906
 
 # Wide field domain for the spatial map panels. The best track is drawn on
 # every map regardless of clipping. clip_outside_radius controls whether
@@ -32,7 +35,7 @@ grid_res: 0.05
 out_dir:          /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
 stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache
-aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/noaa_aorc
+aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/aorc_cache
 
 # First pass: validate AORC access and the MRMS-vs-AORC hourly comparison
 # alone. MRMS is already cached from the model-verification runs and Stage
