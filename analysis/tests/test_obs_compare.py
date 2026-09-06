@@ -198,7 +198,9 @@ def test_check_cache_complete_flags_missing_stage4_hours(monkeypatch):
         # so this test doesn't need a real GRIB fixture.
         monkeypatch.setattr(
             stage4_hourly, "index_stage4_hourly",
-            lambda cache_dir_str: {datetime(2024, 9, 26, 2): Path(tmp) / "ST4.20240926"},
+            lambda cache_dir_str: {
+                datetime(2024, 9, 26, 2): [Path(tmp) / "ST4.20240926"],
+            },
         )
         missing = check_cache_complete(case)
         assert len(missing) == 2   # hours 1 and 3 missing
@@ -219,8 +221,8 @@ def test_check_cache_complete_empty_when_stage4_cached(monkeypatch):
         monkeypatch.setattr(
             stage4_hourly, "index_stage4_hourly",
             lambda cache_dir_str: {
-                datetime(2024, 9, 26, 1): fake_path,
-                datetime(2024, 9, 26, 2): fake_path,
+                datetime(2024, 9, 26, 1): [fake_path],
+                datetime(2024, 9, 26, 2): [fake_path],
             },
         )
         assert check_cache_complete(case) == []

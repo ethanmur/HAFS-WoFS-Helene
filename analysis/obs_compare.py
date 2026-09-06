@@ -32,6 +32,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.transforms import blended_transform_factory
 import cartopy.crs as ccrs
 import yaml
 from botocore import UNSIGNED
@@ -179,6 +180,10 @@ def _draw_track(ax, track_line):
 
 
 def _panel_frame(ax, domain, track_line, title):
+    """Draw one map panel's frame. Returns the text artists, which the
+    caller MUST pass to savefig(bbox_extra_artists=...): they sit outside
+    the axes, and GeoAxes.get_tightbbox() doesn't report them, so
+    bbox_inches="tight" crops them off otherwise."""
     lat_min, lat_max, lon_min, lon_max = domain
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
     _add_us_geography(ax)
@@ -190,12 +195,28 @@ def _panel_frame(ax, domain, track_line, title):
     # ax.set_title() on a GeoAxes is frequently clipped by
     # savefig(bbox_inches="tight"); a plain text artist in axes coordinates
     # is measured correctly and never gets cut off.
-    ax.text(0.5, 1.05, title, transform=ax.transAxes, ha="center",
-            va="bottom", fontsize=11)
-    ax.text(0.5, -0.09, "Longitude", transform=ax.transAxes, ha="center",
-            va="top", fontsize=9)
-    ax.text(-0.1, 0.5, "Latitude", transform=ax.transAxes, ha="center",
-            va="center", rotation=90, fontsize=9)
+    return [
+        ax.text(0.5, 1.05, title, transform=ax.transAxes, ha="center",
+                va="bottom", fontsize=11),
+        ax.text(0.5, -0.09, "Longitude", transform=ax.transAxes, ha="center",
+                va="top", fontsize=9),
+        ax.text(-0.1, 0.5, "Latitude", transform=ax.transAxes, ha="center",
+                va="center", rotation=90, fontsize=9),
+    ]
+
+
+def _figure_title(fig, axes, text):
+    """Figure-wide title as a text artist just above the panel titles.
+
+    fig.suptitle() places itself in figure coordinates, which on these
+    wide, short figures leaves it stranded far above the maps. Blending
+    figure-x with axes-y instead keeps it horizontally centred on the
+    figure while pinning it to the top of the panels. Returned so the
+    caller can include it in bbox_extra_artists.
+    """
+    transform = blended_transform_factory(fig.transFigure, axes[0].transAxes)
+    return axes[0].text(0.5, 1.13, text, transform=transform, ha="center",
+                        va="bottom", fontsize=13)
 
 
 def spatial_multipanel(panels, domain, track_line, suptitle, out_path):
@@ -211,8 +232,9 @@ def spatial_multipanel(panels, domain, track_line, suptitle, out_path):
     if n == 1:
         axes = [axes]
     cf = None
+    labels = []
     for ax, (name, lat, lon, data) in zip(axes, panels):
-        _panel_frame(ax, domain, track_line, name)
+        labels += _panel_frame(ax, domain, track_line, name)
         if data is not None:
             lat2d, lon2d = _as_2d(lat, lon)
             cf = ax.contourf(lon2d, lat2d, inches(data), levels=levels_in,
@@ -225,8 +247,13 @@ def spatial_multipanel(panels, domain, track_line, suptitle, out_path):
         fig.colorbar(cf, ax=axes, label="Precipitation (inches)",
                      ticks=levels_in[::2], shrink=0.7, fraction=0.02,
                      format="%g")
-    fig.suptitle(suptitle, fontsize=13, y=1.04)
-    fig.savefig(out_path, dpi=120, bbox_inches="tight", facecolor="white")
+    labels.append(_figure_title(fig, axes, suptitle))
+    # bbox_extra_artists names the out-of-axes labels explicitly (older
+    # cartopy's GeoAxes.get_tightbbox omits child text, which is what
+    # sheared the Latitude/Longitude labels off earlier figures);
+    # pad_inches then leaves margin regardless of what tight-bbox measured.
+    fig.savefig(out_path, dpi=120, bbox_inches="tight", facecolor="white",
+                bbox_extra_artists=labels, pad_inches=0.4)
     plt.close(fig)
 
 
@@ -243,8 +270,9 @@ def anomaly_multipanel(pairs, grid_lat, grid_lon, domain, track_line,
     if n == 1:
         axes = [axes]
     mesh = None
+    labels = []
     for ax, (label, diff) in zip(axes, pairs):
-        _panel_frame(ax, domain, track_line, label)
+        labels += _panel_frame(ax, domain, track_line, label)
         if diff is not None:
             mesh = ax.pcolormesh(grid_lon, grid_lat, inches(diff), cmap=cmap,
                                  norm=norm, shading="auto",
@@ -255,8 +283,13 @@ def anomaly_multipanel(pairs, grid_lat, grid_lon, domain, track_line,
     if mesh is not None:
         fig.colorbar(mesh, ax=axes, label="Difference (inches)", ticks=ticks,
                      shrink=0.7, fraction=0.02, format="%g")
-    fig.suptitle(suptitle, fontsize=13, y=1.04)
-    fig.savefig(out_path, dpi=120, bbox_inches="tight", facecolor="white")
+    labels.append(_figure_title(fig, axes, suptitle))
+    # bbox_extra_artists names the out-of-axes labels explicitly (older
+    # cartopy's GeoAxes.get_tightbbox omits child text, which is what
+    # sheared the Latitude/Longitude labels off earlier figures);
+    # pad_inches then leaves margin regardless of what tight-bbox measured.
+    fig.savefig(out_path, dpi=120, bbox_inches="tight", facecolor="white",
+                bbox_extra_artists=labels, pad_inches=0.4)
     plt.close(fig)
     return True
 
