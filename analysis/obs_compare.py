@@ -332,6 +332,9 @@ def run_hourly_comparison(case):
     pooled = {p: ([], []) for p in pair_names}
     csv_rows = []
     for t in timestamps:
+
+        print(f'Timestep {t}')
+
         mlat = mlon = mdata = None
         slat = slon = sdata = None
         alat = alon = adata = None
@@ -339,32 +342,44 @@ def run_hourly_comparison(case):
             try:
                 mlat, mlon, mdata = load_mrms_hour(
                     None, t, case.mrms_cache_dir, download=False)
+                print('MRMS Loaded')
             except Exception as e:
                 print(f"  {t:%Y-%m-%d %HZ} MRMS unavailable: {e}", flush=True)
+
         if not case.skip_stage4:
             try:
                 slat, slon, sdata = stage4_hourly.load_stage4_hour(
                     t, case.stage4_cache_dir)
+                print('Stage IV Loaded')
             except Exception as e:
                 print(f"  {t:%Y-%m-%d %HZ} Stage IV unavailable: {e}",
                      flush=True)
+
         if not case.skip_aorc:
             try:
                 alat, alon, adata = aorc_common.load_aorc_hour(
                     t, case.domain, case.aorc_cache_dir, download=False)
+                print('AORC Loaded')
             except Exception as e:
                 print(f"  {t:%Y-%m-%d %HZ} AORC unavailable: {e}", flush=True)
+
         if mdata is None and sdata is None and adata is None:
             continue
 
+        print('all data loaded')
+
         track_line = track_segment(track, case.valid_start, t)
         tag = f"{t:%Y%m%d%H}"
+
+        print('track line created')
 
         def _native_masked(lat, lon, data):
             if data is None:
                 return None
             mask = case_swath_mask(case, track, lat, lon, t, t, step_hours=1)
             return np.where(mask, data, np.nan)
+
+        print('data masked')
 
         spatial_multipanel(
             [("Stage IV", slat, slon, _native_masked(slat, slon, sdata)),
@@ -375,6 +390,8 @@ def run_hourly_comparison(case):
             hourly_dir / f"obs_hourly_map_{tag}.png",
         )
 
+        print('spatial multipanel created')
+
         regridded = {}
         for name, lat, lon, data in (("Stage IV", slat, slon, sdata),
                                      ("MRMS", mlat, mlon, mdata),
@@ -382,8 +399,13 @@ def run_hourly_comparison(case):
             if data is None:
                 regridded[name] = None
                 continue
+
+            print(f'regrid run for {name}')
             reg = regrid_2d_to_fixed(lat, lon, data, grid_lat, grid_lon)
+            print(f'regrid complete for {name}')
             regridded[name] = np.where(grid_swath, reg, np.nan)
+
+        print('data regridded')
 
         anomaly_pairs = []
         for a, b in pair_names:
@@ -407,6 +429,8 @@ def run_hourly_comparison(case):
              f"  MRMS={'ok' if mdata is not None else '--'}"
              f"  AORC={'ok' if adata is not None else '--'}", flush=True)
 
+    print('heatmap start')
+
     heatmap_pairs = [
         (a, b, np.concatenate(va) if va else np.array([]),
         np.concatenate(vb) if vb else np.array([]))
@@ -419,6 +443,9 @@ def run_hourly_comparison(case):
             f"({case.valid_start:%Y-%m-%d %HZ}–{case.valid_end:%Y-%m-%d %HZ})",
             case.out_dir / f"obs_hourly_heatmap_{case.output_slug}.png",
         )
+
+    print('heatmap end')
+
     if csv_rows:
         out_csv = case.out_dir / f"obs_hourly_stats_{case.output_slug}.csv"
         with open(out_csv, "w", newline="") as fh:

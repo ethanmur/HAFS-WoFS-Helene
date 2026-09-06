@@ -45,13 +45,22 @@ def regrid_2d_to_fixed(src_lat, src_lon, data, grid_lat, grid_lon):
     2-D source mesh. Uses linear griddata; points outside the source hull
     come back NaN (no extrapolation).
     """
+
+    print('inner regrid loop')
+
     src_lat = np.asarray(src_lat, dtype=float)
     src_lon = np.asarray(src_lon, dtype=float)
     if src_lat.ndim == 1 and src_lon.ndim == 1:
         src_lon, src_lat = np.meshgrid(src_lon, src_lat)
+
+    print('build src lat lon')
+
     pts = np.column_stack([src_lat.ravel(), src_lon.ravel()])
     vals = np.asarray(data, dtype=float).ravel()
     finite = np.isfinite(vals)
+
+    print('just before griddata')
+
     out = griddata(
         pts[finite], vals[finite],
         (grid_lat, grid_lon), method="linear",
