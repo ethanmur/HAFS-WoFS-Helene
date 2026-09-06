@@ -14,8 +14,8 @@
 storm_name: Hurricane Helene
 best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
 
-valid_start: 2024092500
-valid_end: 2024092600
+valid_start: 2024092401
+valid_end: 2024092906
 
 # 2024092400
 # 2024092906
@@ -32,13 +32,13 @@ clip_outside_radius: false
 # same convention as the rest of the repo (StormCase/CyclesCase default).
 grid_res: 0.05
 
-out_dir:          /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare
+out_dir:          /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare_with_prints
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
 stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache_hourly
 aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/aorc_cache
 
 # MRMS is already cached from the model-verification runs; flip to false
 # once you also want it in the 3-way hourly comparison.
-skip_mrms: true
+skip_mrms: false
 skip_stage4: false
 skip_aorc: false
