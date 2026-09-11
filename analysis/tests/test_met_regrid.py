@@ -263,32 +263,50 @@ def test_ensure_grid_template_copies_first_message_once():
 # NetCDF in and out
 # ----------------------------------------------------------------------------
 
-def test_write_cf_netcdf_has_cf_coordinates_and_fill():
+def test_write_accum_grib2_roundtrip_is_exact_on_aorc_grid():
+    t = datetime(2024, 9, 24, 2)
+    # AORC's real axes: 0.008333 deg from 20N / 130W (not 1/120 deg).
+    lat1d = 20.0 + 0.008333 * np.arange(2400, 2410)
+    lon1d = -130.0 + 0.008333 * np.arange(3601, 3616)
+    data = np.random.default_rng(3).gamma(0.8, 3.0, (lat1d.size, lon1d.size))
+    data[0, 0] = np.nan
     with tempfile.TemporaryDirectory() as tmp:
-        data = np.array([[1.0, np.nan], [2.0, 3.0]])
-        path = met_regrid.write_cf_netcdf([25.0, 25.01], [-85.0, -84.99], data,
-                                          Path(tmp) / "aorc.nc")
-        with netCDF4.Dataset(path) as nc:
-            assert nc.variables["lat"].units == "degrees_north"
-            assert nc.variables["lon"].units == "degrees_east"
-            var = nc.variables["APCP_surface"]
-            assert var._FillValue == met_regrid.MET_MISSING
-            assert np.ma.is_masked(var[:][0, 1])
+        path = met_regrid.write_accum_grib2(lat1d, lon1d, data, t, 1,
+                                            Path(tmp) / "aorc.grb2")
+        lat, lon, vals = met_regrid.read_grib_field(path)
+        assert np.abs(lat[:, 0] - lat1d).max() < 1e-9
+        assert np.abs(lon[0] - lon1d).max() < 1e-9
+        assert np.isnan(vals[0, 0])
+        ok = np.isfinite(data)
+        assert np.abs(vals[ok] - data[ok]).max() < 1e-4
+        # Same identity MET matches Stage IV by: a 1h APCP ending at t.
+        assert met_regrid.extract_accumulation([path], t, hours=1) is not None
+        gid = eccodes.codes_new_from_message(path.read_bytes())
+        try:
+            assert [eccodes.codes_get(gid, k) for k in
+                    ("discipline", "parameterCategory", "parameterNumber")] == [0, 1, 8]
+        finally:
+            eccodes.codes_release(gid)
+
+
+def test_write_accum_grib2_refuses_grids_it_cannot_place_exactly():
+    t = datetime(2024, 9, 24, 2)
+    lon1d = -90.0 + 0.5 * np.arange(4)
+    for lat1d in (20.0 + np.arange(500) / 120.0,       # 1/120: not whole udeg
+                  np.array([22.0, 21.0, 20.0])):       # descending
+        try:
+            met_regrid.write_accum_grib2(lat1d, lon1d,
+                                         np.zeros((lat1d.size, 4)), t, 1,
+                                         Path("/nonexistent/x.grb2"))
+            assert False, "expected ValueError"
+        except ValueError as e:
+            assert "latitude" in str(e)
 
 
 def test_read_regridded_opens_met_style_layout():
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "met.nc"
-        lon2d, lat2d = np.meshgrid([275.0, 276.0, 277.0], [25.0, 26.0])
-        with netCDF4.Dataset(path, "w") as nc:
-            nc.createDimension("lat", 2)
-            nc.createDimension("lon", 3)
-            # 2-D lat/lon named after their own dimensions, as MET writes them
-            nc.createVariable("lat", "f4", ("lat", "lon"))[:] = lat2d
-            nc.createVariable("lon", "f4", ("lat", "lon"))[:] = lon2d
-            v = nc.createVariable("precip", "f4", ("lat", "lon"),
-                                  fill_value=met_regrid.MET_MISSING)
-            v[:] = np.array([[1.0, -9999.0, 2.0], [0.0, 3.0, 4.0]])
+        path = _met_style_output(Path(tmp) / "met.nc",
+                                 [[1.0, np.nan, 2.0], [0.0, 3.0, 4.0]])
         lat, lon, vals = met_regrid.read_regridded(path)
         assert lat.shape == lon.shape == vals.shape == (2, 3)
         assert np.isnan(vals[0, 1]) and vals[1, 2] == 4.0
@@ -311,14 +329,48 @@ def test_regrid_command_argv():
     assert 'level="A1"' in opts["-field"] and "censor_thresh" in opts["-field"]
 
 
+def _met_style_output(path, values):
+    """A regrid_data_plane-shaped NetCDF file holding `values`."""
+    values = np.asarray(values, dtype=float)
+    ny, nx = values.shape
+    lon2d, lat2d = np.meshgrid(275.0 + np.arange(nx), 25.0 + np.arange(ny))
+    with netCDF4.Dataset(path, "w") as nc:
+        nc.createDimension("lat", ny)
+        nc.createDimension("lon", nx)
+        # 2-D lat/lon named after their own dimensions, as MET writes them
+        nc.createVariable("lat", "f4", ("lat", "lon"))[:] = lat2d
+        nc.createVariable("lon", "f4", ("lat", "lon"))[:] = lon2d
+        v = nc.createVariable("precip", "f4", ("lat", "lon"),
+                              fill_value=met_regrid.MET_MISSING)
+        v[:] = np.where(np.isfinite(values), values, met_regrid.MET_MISSING)
+    return path
+
+
 def test_run_regrid_success_is_atomic():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        tool = _executable(tmp / "rdp", 'printf ok > "$3"\n')
+        good = _met_style_output(tmp / "good.nc", [[1.0, 0.0], [np.nan, 2.0]])
+        tool = _executable(tmp / "rdp", f'cp "{good}" "$3"\n')
         out = tmp / "cache" / "stage4" / "stage4_2024092402.nc"
         met_regrid.run_regrid(tool, tmp / "in", tmp / "grid", out, "f", _config(tmp))
-        assert out.read_text() == "ok"
+        assert met_regrid.valid_value_count(out) == 3
         assert [p.name for p in out.parent.iterdir()] == [out.name]
+
+
+def test_run_regrid_rejects_all_missing_output_even_on_exit_0():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        empty = _met_style_output(tmp / "empty.nc", np.full((2, 2), np.nan))
+        tool = _executable(tmp / "rdp", 'echo "WARNING: grid mismatch" >&2\n'
+                                        f'cp "{empty}" "$3"\n')
+        out = tmp / "cache" / "aorc" / "aorc_2024092402.nc"
+        try:
+            met_regrid.run_regrid(tool, tmp / "in", tmp / "grid", out, "f",
+                                  _config(tmp))
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert "all-missing" in str(e) and "grid mismatch" in str(e)
+        assert list(out.parent.iterdir()) == []
 
 
 def test_run_regrid_failure_reports_met_log_and_leaves_nothing():

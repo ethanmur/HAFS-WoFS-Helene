@@ -12,7 +12,6 @@ from typing import Optional
 import eccodes
 import netCDF4
 import numpy as np
-import xarray as xr
 from scipy.spatial import cKDTree
 
 R_EARTH_KM = 6371.0
@@ -28,7 +27,7 @@ _CENSOR = " censor_thresh=[ <0 ]; censor_val=[ -9999 ];"
 DEFAULT_FIELDS = {
     "mrms": 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";' + _CENSOR,
     "stage4": 'name="APCP"; level="A1";' + _CENSOR,
-    "aorc": 'name="APCP_surface"; level="(*,*)";' + _CENSOR,
+    "aorc": 'name="APCP"; level="A1";' + _CENSOR,
 }
 
 
@@ -107,15 +106,20 @@ def regrid_command(tool, input_path, grid_path, out_path, field_spec, config):
             "-width", str(config.width),
             "-vld_thresh", str(config.vld_thresh),
             "-name", OUTPUT_NAME,
-            "-v", "1"]
+            "-v", "2"]
 
 
 def _tmp_path(path):
     return path.with_name(f"{path.stem}.tmp{path.suffix}")
 
 
+def _met_failure(summary, cmd, proc):
+    log = (proc.stderr + proc.stdout).strip().splitlines()
+    return f"{summary}:\n  {shlex.join(cmd)}\n  " + "\n  ".join(log[-20:])
+
+
 def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
-    """Run regrid_data_plane, writing out_path only on success."""
+    """Run regrid_data_plane, writing out_path only on a usable result."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _tmp_path(out_path)
@@ -123,10 +127,14 @@ def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0 or not tmp.exists():
-            log = (proc.stderr + proc.stdout).strip().splitlines()
-            raise RuntimeError(
-                f"regrid_data_plane failed (exit {proc.returncode}):\n  "
-                + shlex.join(cmd) + "\n  " + "\n  ".join(log[-15:]))
+            raise RuntimeError(_met_failure(
+                f"regrid_data_plane failed (exit {proc.returncode})", cmd, proc))
+        # MET can exit 0 having found no usable source data (e.g. a grid it
+        # misread), leaving an all-missing field that must not be cached.
+        if valid_value_count(tmp) == 0:
+            raise RuntimeError(_met_failure(
+                "regrid_data_plane exited 0 but wrote an all-missing field",
+                cmd, proc))
         tmp.replace(out_path)
     finally:
         tmp.unlink(missing_ok=True)
@@ -227,26 +235,64 @@ def extract_accumulation(paths, valid_end, hours):
     return None if best is None else best[1]
 
 
-def write_cf_netcdf(lat1d, lon1d, data, out_path, var="APCP_surface"):
-    """Lat/lon NetCDF with the CF coordinate attributes MET keys off."""
-    ds = xr.Dataset(
-        {var: (("lat", "lon"), np.asarray(data, dtype="float32"),
-               {"units": "kg m-2",
-                "long_name": "1-hour accumulated precipitation"})},
-        coords={
-            "lat": ("lat", np.asarray(lat1d, dtype=float),
-                    {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": ("lon", np.asarray(lon1d, dtype=float),
-                    {"units": "degrees_east", "standard_name": "longitude"}),
-        },
-        attrs={"Conventions": "CF-1.6"},
-    )
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _tmp_path(out_path)
-    ds.to_netcdf(tmp, encoding={var: {"_FillValue": MET_MISSING}})
-    tmp.replace(out_path)
-    return out_path
+def _microdegrees(axis, name):
+    """(first, increment) of a regular ascending axis in whole microdegrees."""
+    axis = np.asarray(axis, dtype=float)
+    first = int(round(axis[0] * 1e6))
+    inc = int(round((axis[-1] - axis[0]) * 1e6 / (axis.size - 1)))
+    rebuilt = (first + inc * np.arange(axis.size)) / 1e6
+    # GRIB2 places a regular grid as first point + a fixed whole-microdegree
+    # increment; any other axis would be silently misplaced.
+    if inc <= 0 or np.abs(rebuilt - axis).max() > 5e-7:
+        raise ValueError(f"{name} is not a regular ascending axis in whole "
+                         "microdegrees, so GRIB2 can't represent it exactly")
+    return first, inc
+
+
+def write_accum_grib2(lat1d, lon1d, data, valid_end, hours, out_path):
+    """Regular lat/lon APCP accumulation as GRIB2, encoded like Stage IV."""
+    lat1d = np.asarray(lat1d, dtype=float)
+    lon1d = _wrap_lon(lon1d)
+    lat0, dlat = _microdegrees(lat1d, "latitude")
+    lon0, dlon = _microdegrees(lon1d, "longitude")
+    nj, ni = lat1d.size, lon1d.size
+    values = np.asarray(data, dtype=float).reshape(nj, ni)
+    ref = valid_end - timedelta(hours=hours)
+    gid = eccodes.codes_grib_new_from_samples("GRIB2")
+    try:
+        for key, val in [
+                ("centre", 7), ("discipline", 0),
+                ("jScansPositively", 1), ("iScansNegatively", 0),
+                ("Ni", ni), ("Nj", nj),
+                ("latitudeOfFirstGridPoint", lat0),
+                ("longitudeOfFirstGridPoint", lon0 % 360_000_000),
+                ("latitudeOfLastGridPoint", lat0 + dlat * (nj - 1)),
+                ("longitudeOfLastGridPoint", (lon0 + dlon * (ni - 1)) % 360_000_000),
+                ("iDirectionIncrement", dlon), ("jDirectionIncrement", dlat),
+                ("productDefinitionTemplateNumber", 8),
+                ("parameterCategory", 1), ("parameterNumber", 8),
+                ("typeOfFirstFixedSurface", 1),
+                ("dataDate", int(f"{ref:%Y%m%d}")),
+                ("dataTime", int(f"{ref:%H%M}")),
+                ("indicatorOfUnitOfTimeRange", 1), ("forecastTime", 0),
+                ("typeOfStatisticalProcessing", 1), ("typeOfTimeIncrement", 2),
+                ("indicatorOfUnitForTimeRange", 1), ("lengthOfTimeRange", hours),
+                # Last: the step/length setters rewrite end-of-interval keys.
+                ("yearOfEndOfOverallTimeInterval", valid_end.year),
+                ("monthOfEndOfOverallTimeInterval", valid_end.month),
+                ("dayOfEndOfOverallTimeInterval", valid_end.day),
+                ("hourOfEndOfOverallTimeInterval", valid_end.hour),
+                ("minuteOfEndOfOverallTimeInterval", valid_end.minute),
+                ("secondOfEndOfOverallTimeInterval", 0),
+                ("bitsPerValue", 24), ("bitmapPresent", 1),
+                ("missingValue", 9999)]:
+            eccodes.codes_set(gid, key, val)
+        eccodes.codes_set_values(
+            gid, np.where(np.isfinite(values), values, 9999.0).ravel())
+        msg = eccodes.codes_get_message(gid)
+    finally:
+        eccodes.codes_release(gid)
+    return write_bytes(out_path, msg)
 
 
 # =============================================================================
@@ -310,6 +356,10 @@ def read_regridded(path, name=OUTPUT_NAME):
     if lat.ndim == 1:
         lon, lat = np.meshgrid(lon, lat)
     return lat, _wrap_lon(lon), values
+
+
+def valid_value_count(path, name=OUTPUT_NAME):
+    return int(np.isfinite(read_regridded(path, name)[2]).sum())
 
 
 # =============================================================================

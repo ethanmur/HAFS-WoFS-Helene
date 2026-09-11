@@ -641,8 +641,8 @@ def _native_hour(case, source, t, want_latlon):
     lat = lon = None
     if want_latlon:
         lon, lat = np.meshgrid(lon1d, lat1d)
-    return lat, lon, vals, lambda staging: met_regrid.write_cf_netcdf(
-        lat1d, lon1d, vals, staging / f"aorc_{t:%Y%m%d%H}.nc")
+    return lat, lon, vals, lambda staging: met_regrid.write_accum_grib2(
+        lat1d, lon1d, vals, t, 1, staging / f"aorc_{t:%Y%m%d%H}.grb2")
 
 
 def regrid_obs(case):
@@ -681,6 +681,8 @@ def regrid_obs(case):
             lat, lon, vals, write_met_input = _native_hour(case, source, t,
                                                            want_latlon=first)
             out = cfg.output_path(source, t)
+            if out.exists() and met_regrid.valid_value_count(out) == 0:
+                out.unlink()   # an all-missing field is never a valid cache entry
             status = "cached"
             if not out.exists():
                 staged = write_met_input(staging)

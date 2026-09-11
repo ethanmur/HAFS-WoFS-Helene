@@ -246,7 +246,8 @@ python analysis/run.py storms/helene_obs_compare.yaml obs-compare
 
 `regrid-obs` hands MET exactly one unambiguous field per file: the cached
 MRMS GRIB2 as-is, the single finest-grid 1h message cut out of the
-multi-record `ST4.<day>` file, and AORC rewritten as CF NetCDF. Its
+multi-record `ST4.<day>` file, and AORC written as an equivalent 1-hour APCP
+GRIB2 message (its 0.008333° grid is exact in GRIB2's microdegree units). Its
 `regrid_budget_<case>.csv` compares, per source per hour, MET's area-weighted
 mean over the common valid area against an exact box average of the native
 field; rows beyond `tolerance_pct` (and 0.01 mm) are flagged `CHECK`. The
