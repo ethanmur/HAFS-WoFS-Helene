@@ -78,6 +78,8 @@ class ObsCompareCase:
     clip_outside_radius: bool = False
     case_slug: str = "obs_compare"
     regrid: Optional[met_regrid.RegridConfig] = None
+    regrid_plot_dir: Optional[Path] = None   # plot-regrid output root
+    zoom_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
 
     def fixed_grid(self):
         return make_fixed_grid(self.domain, self.grid_res)
@@ -102,6 +104,11 @@ def from_yaml(yaml_path):
     valid_end = datetime.strptime(str(cfg["valid_end"]), "%Y%m%d%H")
     if valid_end <= valid_start:
         raise ValueError(f"valid_end must be after valid_start in {yaml_path}")
+    plots = cfg.get("regrid_plots") or {}
+    zoom = plots.get("zoom_domain")
+    if zoom is not None and len(zoom) != 4:
+        raise ValueError("regrid_plots.zoom_domain must be "
+                         f"[lat_min, lat_max, lon_min, lon_max] in {yaml_path}")
     return ObsCompareCase(
         storm_name=cfg.get("storm_name", "Storm"),
         best_track=Path(cfg["best_track"]),
@@ -120,6 +127,9 @@ def from_yaml(yaml_path):
         clip_outside_radius=bool(cfg.get("clip_outside_radius", False)),
         case_slug=yaml_path.stem,
         regrid=met_regrid.regrid_config_from_dict(cfg.get("regrid")),
+        regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
+                         else out_dir / "regrid"),
+        zoom_domain=tuple(float(v) for v in zoom) if zoom else None,
     )
 
 

@@ -20,7 +20,10 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 grid with MET regrid_data_plane, cached as NetCDF, plus a
                 per-hour conservation check CSV; needs `module load met`
                 (takes an obs-compare YAML with a `regrid:` block)
-  obs-compare   MRMS/Stage IV/AORC hourly observation-vs-observation
+  plot-regrid   hourly maps of the regrid-obs output: native vs regridded
+                (full + zoom domain), all products side by side, and
+                anomalies vs AORC; reads the caches only (same YAML)
+  obs-compare  MRMS/Stage IV/AORC hourly observation-vs-observation
                 comparison, no HAFS forecast involved; reads the cache only
                 and never downloads -- errors immediately if anything
                 needed is missing (takes an obs-compare YAML)
@@ -33,8 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
             "compare", "replot", "ml", "download-obs", "regrid-obs",
-            "obs-compare")
-OBS_COMMANDS = ("download-obs", "regrid-obs", "obs-compare")
+            "plot-regrid", "obs-compare")
+OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "obs-compare")
 
 
 def parse_args(argv):
@@ -42,7 +45,7 @@ def parse_args(argv):
     if not argv:
         print("usage: run.py <case.yaml> "
               "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|"
-              "download-obs|regrid-obs|obs-compare]")
+              "download-obs|regrid-obs|plot-regrid|obs-compare]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -75,6 +78,10 @@ def main(argv):
     if command in OBS_COMMANDS:
         import obs_compare
         obs_case = obs_compare.from_yaml(yaml_path)
+        if command == "plot-regrid":
+            from obs_regrid_plots import plot_regrid
+            plot_regrid(obs_case)
+            return
         {"download-obs": obs_compare.download_obs,
          "regrid-obs": obs_compare.regrid_obs,
          "obs-compare": obs_compare.run_obs_compare}[command](obs_case)

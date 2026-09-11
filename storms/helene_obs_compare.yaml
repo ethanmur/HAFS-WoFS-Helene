@@ -57,3 +57,11 @@ regrid:
   # Per-source MET field strings, only if a default doesn't match your files:
   # fields:
   #   mrms: 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";'
+
+# Maps of the regridded obs (plot-regrid). Subfolders compare-regrid/,
+# compare-products/, compare-anomaly/ are created under out_dir.
+# zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the extra
+# native-vs-regridded close-up; delete it to skip the zoom maps.
+regrid_plots:
+  out_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare/regrid
+  zoom_domain: [34.0, 35.0, -83.0, -81.0]

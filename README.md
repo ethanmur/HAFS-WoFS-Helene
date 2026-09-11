@@ -237,6 +237,14 @@ python analysis/run.py storms/helene_obs_compare.yaml download-obs
 # are skipped; the per-hour conservation check is always rewritten.
 python analysis/run.py storms/helene_obs_compare.yaml regrid-obs
 
+# Hourly maps of the regrid-obs output, under regrid_plots.out_dir:
+#   compare-regrid/<source>_{full,zoom}_<YYYYMMDDHH>.png  native vs regridded
+#   compare-products/products_full_<...>.png  MRMS | Stage IV | AORC regridded
+#   compare-anomaly/anomaly_full_<...>.png    AORC | AORC-MRMS | AORC-Stage IV
+# The zoom box is regrid_plots.zoom_domain. Headers quote the area-mean
+# change from the regrid-obs conservation CSV when it exists.
+python analysis/run.py storms/helene_obs_compare.yaml plot-regrid
+
 # On a compute node (no internet): reads the cache only, never downloads.
 # If anything is missing, this prints exactly what's missing and exits
 # immediately rather than attempting a fetch or silently producing a
