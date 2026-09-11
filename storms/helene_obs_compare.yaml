@@ -1,0 +1,59 @@
+# Hurricane Helene — observation-vs-observation validation.
+#
+# No HAFS forecast involved: this checks that MRMS, Stage IV, and AORC agree
+# with each other before any of them is trusted as verification truth
+# elsewhere in this repo. All three are compared natively hourly.
+#
+# Stage IV hourly data (ST4.<YYYYMMDD> files) is NOT fetched by
+# download-obs -- place it under stage4_cache_dir yourself before running
+# obs-compare; see analysis/stage4_hourly.py.
+#
+# Run with:
+#   python analysis/run.py storms/helene_obs_compare.yaml obs-compare
+
+storm_name: Hurricane Helene
+best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
+
+valid_start: 2024092401
+valid_end: 2024092906
+
+# 2024092400
+# 2024092906
+
+# Wide field domain for the spatial map panels. The best track is drawn on
+# every map regardless of clipping. clip_outside_radius controls whether
+# data outside mask_radius_km is blanked (true) or shown (false, the
+# default) -- off here so a full-domain sanity check is the default view.
+domain: [15.0, 42.0, -100.0, -60.0]
+mask_radius_km: 500
+clip_outside_radius: false
+
+# Common grid for regridded products (anomaly maps, pooled 1:1 heatmaps) --
+# same convention as the rest of the repo (StormCase/CyclesCase default).
+grid_res: 0.05
+
+out_dir:          /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-output/helene_obs_compare_with_prints
+mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/mrms_cache
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/stage4_cache_hourly
+aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/aorc_cache
+
+# MRMS is already cached from the model-verification runs; flip to false
+# once you also want it in the 3-way hourly comparison.
+skip_mrms: false
+skip_stage4: false
+skip_aorc: false
+
+# MET regridding (regrid-obs). Each obs hour is regridded once onto the grid
+# of grid_template -- any GRIB file on the target grid; the first glob match
+# is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.
+regrid:
+  grid_template: /work2/noaa/aoml-hafs1/ahazelto/student_data/suchit_data/helene/HFSA/**/*2024092400*parent.atm.f*.grb2
+  grid_name: hafs_parent
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/regrid_cache
+  method: BUDGET
+  width: 2
+  vld_thresh: 0.5
+  tolerance_pct: 2.0
+  # Per-source MET field strings, only if a default doesn't match your files:
+  # fields:
+  #   mrms: 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";'
