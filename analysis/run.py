@@ -16,6 +16,10 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 plotting; run this on a login node. Stage IV hourly data is
                 NOT fetched here (see analysis/stage4_hourly.py); place it
                 in the cache yourself (takes an obs-compare YAML)
+  regrid-obs    regrid every cached obs hour onto the regrid.grid_template
+                grid with MET regrid_data_plane, cached as NetCDF, plus a
+                per-hour conservation check CSV; needs `module load met`
+                (takes an obs-compare YAML with a `regrid:` block)
   obs-compare   MRMS/Stage IV/AORC hourly observation-vs-observation
                 comparison, no HAFS forecast involved; reads the cache only
                 and never downloads -- errors immediately if anything
@@ -28,14 +32,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
-            "compare", "replot", "ml", "download-obs", "obs-compare")
+            "compare", "replot", "ml", "download-obs", "regrid-obs",
+            "obs-compare")
+OBS_COMMANDS = ("download-obs", "regrid-obs", "obs-compare")
 
 
 def parse_args(argv):
     """(yaml_path, command) from argv; command defaults to 'all'."""
     if not argv:
         print("usage: run.py <case.yaml> "
-              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|download-obs|obs-compare]")
+              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|"
+              "download-obs|regrid-obs|obs-compare]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -65,15 +72,12 @@ def dispatch(case, command):
 
 def main(argv):
     yaml_path, command = parse_args(argv)
-    if command in ("download-obs", "obs-compare"):
-        from obs_compare import from_yaml as obs_from_yaml
-        obs_case = obs_from_yaml(yaml_path)
-        if command == "download-obs":
-            from obs_compare import download_obs
-            download_obs(obs_case)
-        else:
-            from obs_compare import run_obs_compare
-            run_obs_compare(obs_case)
+    if command in OBS_COMMANDS:
+        import obs_compare
+        obs_case = obs_compare.from_yaml(yaml_path)
+        {"download-obs": obs_compare.download_obs,
+         "regrid-obs": obs_compare.regrid_obs,
+         "obs-compare": obs_compare.run_obs_compare}[command](obs_case)
         return
     if command == "ml":
         from ml_regime import load_ml_config, run_ml

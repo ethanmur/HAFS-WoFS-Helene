@@ -21,9 +21,11 @@ Usage:
 
 import csv
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -49,6 +51,7 @@ from compare import _add_us_geography
 from skill_metrics import continuous_scores
 from plot_units import inches
 import aorc_common
+import met_regrid
 import stage4_hourly
 
 
@@ -74,6 +77,7 @@ class ObsCompareCase:
     skip_aorc: bool = False
     clip_outside_radius: bool = False
     case_slug: str = "obs_compare"
+    regrid: Optional[met_regrid.RegridConfig] = None
 
     def fixed_grid(self):
         return make_fixed_grid(self.domain, self.grid_res)
@@ -115,6 +119,7 @@ def from_yaml(yaml_path):
         skip_aorc=bool(cfg.get("skip_aorc", False)),
         clip_outside_radius=bool(cfg.get("clip_outside_radius", False)),
         case_slug=yaml_path.stem,
+        regrid=met_regrid.regrid_config_from_dict(cfg.get("regrid")),
     )
 
 
@@ -587,25 +592,160 @@ def check_cache_complete(case):
     return missing
 
 
-def run_obs_compare(case):
-    case.out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Obs compare: {case.storm_name}")
+def _exit_if_cache_incomplete(case, command):
+    missing = check_cache_complete(case)
+    if not missing:
+        return
+    print(f"\nERROR: required data is not cached, and {command} does not "
+         "download it. Run this first (on a node with internet):\n"
+         "  python analysis/run.py <yaml> download-obs\n")
+    for item in missing[:25]:
+        print(f"  missing: {item}")
+    if len(missing) > 25:
+        print(f"  ... and {len(missing) - 25} more")
+    raise SystemExit(1)
+
+
+def _print_case_header(case, title):
+    print(f"{title}: {case.storm_name}")
     print(f"Window: {case.valid_start:%Y-%m-%d %HZ} -> "
          f"{case.valid_end:%Y-%m-%d %HZ}")
     print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
-         f"skip_aorc={case.skip_aorc}")
+         f"skip_aorc={case.skip_aorc}", flush=True)
 
-    missing = check_cache_complete(case)
-    if missing:
-        print("\nERROR: required data is not cached, and obs-compare does "
-             "not download it. Run this first (on a node with internet):\n"
-             "  python analysis/run.py <yaml> download-obs\n")
-        for item in missing[:25]:
-            print(f"  missing: {item}")
-        if len(missing) > 25:
-            print(f"  ... and {len(missing) - 25} more")
-        raise SystemExit(1)
 
+# =============================================================================
+# Regrid (compute node) -- MET, cached to disk, ahead of any analysis
+# =============================================================================
+
+def _native_hour(case, source, t, want_latlon):
+    """(lat2d, lon2d, values2d, write_met_input) for one cached obs hour."""
+    if source == "mrms":
+        _, fname = mrms_s3_key(t)
+        path = case.mrms_cache_dir / fname.replace(".gz", "")
+        lat, lon, vals = met_regrid.read_grib_field(path, want_latlon)
+        return lat, lon, vals, lambda staging: path
+    if source == "stage4":
+        paths = stage4_hourly.index_stage4_hourly(
+            str(case.stage4_cache_dir)).get(t, [])
+        msg = met_regrid.extract_accumulation(paths, t, hours=1)
+        if msg is None:
+            raise FileNotFoundError(
+                f"no 1h Stage IV GRIB message for {t:%Y-%m-%d %HZ} in "
+                f"{[p.name for p in paths]}")
+        lat, lon, vals = met_regrid.read_grib_message(msg, want_latlon)
+        return lat, lon, vals, lambda staging: met_regrid.write_bytes(
+            staging / f"stage4_{t:%Y%m%d%H}.grb2", msg)
+    lat1d, lon1d, vals = aorc_common.load_aorc_hour(
+        t, case.domain, case.aorc_cache_dir, download=False)
+    lat = lon = None
+    if want_latlon:
+        lon, lat = np.meshgrid(lon1d, lat1d)
+    return lat, lon, vals, lambda staging: met_regrid.write_cf_netcdf(
+        lat1d, lon1d, vals, staging / f"aorc_{t:%Y%m%d%H}.nc")
+
+
+def regrid_obs(case):
+    """Regrid every cached obs hour with MET and check it conserves rain."""
+    cfg = case.regrid
+    if cfg is None:
+        raise SystemExit("ERROR: regrid-obs needs a `regrid:` block in the YAML")
+    _print_case_header(case, "Regrid obs")
+    _exit_if_cache_incomplete(case, "regrid-obs")
+
+    tool = met_regrid.met_tool("regrid_data_plane", cfg.met_bin_dir)
+    grid_file = met_regrid.ensure_grid_template(cfg)
+    template = (cfg.grid_dir / "grid_template_source.txt").read_text().strip()
+    print(f"MET tool: {tool}")
+    print(f"Grid:     {template}")
+    print(f"Method:   {cfg.method} (width {cfg.width}, "
+         f"vld_thresh {cfg.vld_thresh})")
+    print(f"Cache:    {cfg.grid_dir}", flush=True)
+
+    sources = [s for s, skip in (("mrms", case.skip_mrms),
+                                 ("stage4", case.skip_stage4),
+                                 ("aorc", case.skip_aorc)) if not skip]
+    if not sources:
+        print("All sources skipped -- nothing to regrid.")
+        return
+    staging = cfg.grid_dir / "_staging"
+    timestamps = hourly_timestamps(case.valid_start, case.valid_end)
+    target = None
+    native_grids = {}
+    rows = []
+    started = time.monotonic()
+    for i, t in enumerate(timestamps, 1):
+        notes = []
+        for source in sources:
+            first = source not in native_grids
+            lat, lon, vals, write_met_input = _native_hour(case, source, t,
+                                                           want_latlon=first)
+            out = cfg.output_path(source, t)
+            status = "cached"
+            if not out.exists():
+                staged = write_met_input(staging)
+                try:
+                    met_regrid.run_regrid(tool, staged, grid_file, out,
+                                          cfg.field_spec(source), cfg)
+                finally:
+                    if staged.parent == staging:
+                        staged.unlink(missing_ok=True)
+                status = "regridded"
+            rlat, rlon, rvals = met_regrid.read_regridded(out)
+
+            if target is None:
+                target = met_regrid.TargetGrid(rlat, rlon)
+                print(f"Target grid: {target.shape[0]} x {target.shape[1]}",
+                     flush=True)
+                outside = target.fraction_outside(*case.domain)
+                if outside > 0:
+                    print(f"WARNING: {100 * outside:.0f}% of the case domain "
+                         "lies outside the grid template -- obs there are "
+                         "not regridded.", flush=True)
+            elif rvals.shape != target.shape:
+                raise ValueError(
+                    f"{out} is {rvals.shape}, expected {target.shape} -- was "
+                    "the template changed without changing regrid.grid_name?")
+            if first:
+                native_grids[source] = met_regrid.NativeGrid.build(lat, lon,
+                                                                   target)
+            elif vals.shape != native_grids[source].shape:
+                raise ValueError(f"{source} native grid changed shape at {t}")
+
+            row = met_regrid.budget_row(target, rvals, vals,
+                                        native_grids[source], cfg.tolerance_pct)
+            rows.append({"valid": f"{t:%Y-%m-%d %H:%M}", "source": source,
+                         "status": status, **row})
+            notes.append(f"{source} {status} {row['mean_pct_diff']:+.2f}%"
+                         + (f" {row['flag']}" if row["flag"] else ""))
+        print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  "
+             + "  ".join(notes)
+             + f"  (+{time.monotonic() - started:.0f}s)", flush=True)
+
+    case.out_dir.mkdir(parents=True, exist_ok=True)
+    out_csv = case.out_dir / f"regrid_budget_{case.output_slug}.csv"
+    with open(out_csv, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+    print(f"\nSaved conservation check: {out_csv}")
+    flagged = [r for r in rows if r["flag"]]
+    if not flagged:
+        print(f"All {len(rows)} source-hours within {cfg.tolerance_pct}%.")
+        return
+    print(f"{len(flagged)} of {len(rows)} source-hours flagged "
+         f"(|diff| > {cfg.tolerance_pct}% and > {met_regrid.ABS_FLOOR_MM} mm):")
+    for r in flagged[:10]:
+        print(f"  {r['valid']}  {r['source']:<6}  {r['mean_pct_diff']:+.2f}%  "
+             f"({r['native_mean_mm']} -> {r['regrid_mean_mm']} mm)  {r['flag']}")
+    if len(flagged) > 10:
+        print(f"  ... and {len(flagged) - 10} more in the CSV")
+
+
+def run_obs_compare(case):
+    case.out_dir.mkdir(parents=True, exist_ok=True)
+    _print_case_header(case, "Obs compare")
+    _exit_if_cache_incomplete(case, "obs-compare")
     run_hourly_comparison(case)
 
 

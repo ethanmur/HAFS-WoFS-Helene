@@ -231,12 +231,28 @@ node can run the comparison against data a login node already fetched:
 # yourself (see analysis/stage4_hourly.py) before running obs-compare.
 python analysis/run.py storms/helene_obs_compare.yaml download-obs
 
+# On a compute node: regrid every cached obs hour onto the HAFS parent grid
+# with MET regrid_data_plane (BUDGET by default), cached as NetCDF under
+# regrid.cache_dir. Needs `module load met/12.2.0`. Hours already regridded
+# are skipped; the per-hour conservation check is always rewritten.
+python analysis/run.py storms/helene_obs_compare.yaml regrid-obs
+
 # On a compute node (no internet): reads the cache only, never downloads.
 # If anything is missing, this prints exactly what's missing and exits
 # immediately rather than attempting a fetch or silently producing a
 # partial comparison.
 python analysis/run.py storms/helene_obs_compare.yaml obs-compare
 ```
+
+`regrid-obs` hands MET exactly one unambiguous field per file: the cached
+MRMS GRIB2 as-is, the single finest-grid 1h message cut out of the
+multi-record `ST4.<day>` file, and AORC rewritten as CF NetCDF. Its
+`regrid_budget_<case>.csv` compares, per source per hour, MET's area-weighted
+mean over the common valid area against an exact box average of the native
+field; rows beyond `tolerance_pct` (and 0.01 mm) are flagged `CHECK`. The
+target grid is whatever `regrid.grid_template` points at — note HAFS parent
+domains can differ between cycles, so pick a template covering the whole case
+window (the run warns if part of `domain` falls outside it).
 
 All three sources are compared natively hourly, each individually skippable
 (`skip_mrms` / `skip_stage4` / `skip_aorc` — a skipped source is left out of
@@ -317,6 +333,7 @@ analysis/
   obs_compare.py     MRMS/Stage IV/AORC observation-vs-observation analysis
   aorc_common.py     NOAA AORC (Zarr, S3) access and per-hour caching
   stage4_hourly.py   NCEP ST4.<day> hourly Stage IV access (cache-only)
+  met_regrid.py      MET regrid_data_plane wrapper and conservation check
   skill_metrics.py   shared continuous and neighborhood metrics
   best_track.py      NHC b-deck parsing
   viewer.py          local/offline results gallery

@@ -42,3 +42,18 @@ aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/aorc_cach
 skip_mrms: false
 skip_stage4: false
 skip_aorc: false
+
+# MET regridding (regrid-obs). Each obs hour is regridded once onto the grid
+# of grid_template -- any GRIB file on the target grid; the first glob match
+# is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.
+regrid:
+  grid_template: /work2/noaa/aoml-hafs1/ahazelto/student_data/suchit_data/helene/HFSA/**/*2024092400*parent.atm.f*.grb2
+  grid_name: hafs_parent
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/regrid_cache
+  method: BUDGET
+  width: 2
+  vld_thresh: 0.5
+  tolerance_pct: 2.0
+  # Per-source MET field strings, only if a default doesn't match your files:
+  # fields:
+  #   mrms: 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";'

@@ -9,6 +9,7 @@ botocore
 cfgrib
 eccodes
 xarray
+netCDF4
 zarr
 s3fs
 matplotlib

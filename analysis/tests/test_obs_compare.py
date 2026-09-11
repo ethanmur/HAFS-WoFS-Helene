@@ -130,6 +130,23 @@ def test_from_yaml_round_trip_and_defaults():
         assert case.output_slug == "case_2024092400_2024092906"
 
 
+def test_from_yaml_regrid_block_is_optional():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024092400,
+                "valid_end": 2024092406, "domain": [15.0, 42.0, -100.0, -60.0]}
+        plain = Path(tmp) / "plain.yaml"
+        plain.write_text(yaml.safe_dump(base))
+        assert from_yaml(plain).regrid is None
+
+        with_regrid = Path(tmp) / "regrid.yaml"
+        with_regrid.write_text(yaml.safe_dump({**base, "regrid": {
+            "grid_template": "/hafs/**/*parent.atm.f*.grb2",
+            "cache_dir": "/cache", "tolerance_pct": 1.5}}))
+        cfg = from_yaml(with_regrid).regrid
+        assert cfg.method == "BUDGET" and cfg.tolerance_pct == 1.5
+        assert cfg.grid_dir == Path("/cache/hafs_parent_budget")
+
+
 def test_from_yaml_requires_core_fields():
     with tempfile.TemporaryDirectory() as tmp:
         yaml_path = Path(tmp) / "case.yaml"

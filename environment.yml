@@ -15,6 +15,7 @@ dependencies:
   - eccodes
   - python-eccodes
   - xarray
+  - netcdf4
   - zarr
   - s3fs
   - matplotlib
