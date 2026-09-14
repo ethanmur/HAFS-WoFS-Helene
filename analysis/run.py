@@ -23,6 +23,9 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
   plot-regrid   hourly maps of the regrid-obs output: native vs regridded
                 (full + zoom domain), all products side by side, and
                 anomalies vs AORC; reads the caches only (same YAML)
+  stats-regrid  distributions and cell-by-cell 1:1 comparisons of the
+                regridded products, per hour and over the whole window,
+                land-only and including ocean, plus stats CSVs (same YAML)
   obs-compare  MRMS/Stage IV/AORC hourly observation-vs-observation
                 comparison, no HAFS forecast involved; reads the cache only
                 and never downloads -- errors immediately if anything
@@ -36,8 +39,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
             "compare", "replot", "ml", "download-obs", "regrid-obs",
-            "plot-regrid", "obs-compare")
-OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "obs-compare")
+            "plot-regrid", "stats-regrid", "obs-compare")
+OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
+                "obs-compare")
 
 
 def parse_args(argv):
@@ -45,7 +49,7 @@ def parse_args(argv):
     if not argv:
         print("usage: run.py <case.yaml> "
               "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|"
-              "download-obs|regrid-obs|plot-regrid|obs-compare]")
+              "download-obs|regrid-obs|plot-regrid|stats-regrid|obs-compare]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -81,6 +85,10 @@ def main(argv):
         if command == "plot-regrid":
             from obs_regrid_plots import plot_regrid
             plot_regrid(obs_case)
+            return
+        if command == "stats-regrid":
+            from obs_regrid_stats import stats_regrid
+            stats_regrid(obs_case)
             return
         {"download-obs": obs_compare.download_obs,
          "regrid-obs": obs_compare.regrid_obs,
