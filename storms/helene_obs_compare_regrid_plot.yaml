@@ -16,7 +16,7 @@
 storm_name: Hurricane Helene
 best_track: /work2/noaa/aoml-hafs1/emurray/HAFS-WoFS-Helene-data/best_track/bal092024.dat
 
-valid_start: 2024092401
+valid_start: 2024092404
 valid_end: 2024092906
 
 # 2024092400
