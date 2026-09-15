@@ -42,7 +42,8 @@ MAX_BIN_MM = 200.0       # heavier hours pile into the last bin
 N_BINS = 40
 BIN_EDGES = np.logspace(np.log10(MIN_RAIN_MM), np.log10(MAX_BIN_MM), N_BINS + 1)
 BIN_CENTERS = np.sqrt(BIN_EDGES[:-1] * BIN_EDGES[1:])
-COLORS = {"mrms": "#d62728", "stage4": "#1f77b4", "aorc": "#2ca02c"}
+# Okabe-Ito: distinguishable under red-green colour blindness.
+COLORS = {"mrms": "#e69f00", "stage4": "#0072b2", "aorc": "#009e73"}
 DPI = 130
 
 
